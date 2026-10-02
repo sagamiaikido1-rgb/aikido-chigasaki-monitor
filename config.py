@@ -14,7 +14,6 @@ TARGET_BUILDINGS = {
 TARGET_CONDITIONS = [
     {"weekday": "（日）", "hours": ["9", "10", "11"], "label": "日曜朝 9:00-12:00"},
     {"weekday": "（水）", "hours": ["18", "19", "20"], "label": "水曜夜 18:00-21:00"},
-    {"weekday": "（日）", "hours": ["18", "19", "20"], "label": "日曜夜 18:00-21:00"},
 ]
 
 AVAILABLE_MARK = "○"
