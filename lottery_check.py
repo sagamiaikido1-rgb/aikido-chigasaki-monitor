@@ -325,31 +325,48 @@ def _add_months(d: date, n: int) -> date:
 
 
 def open_day_view(page, building="総合体育館"):
-    ca.goto_with_retry(page, ca.BASE_URL)
-    page.wait_for_timeout(1200)
-    ca.click_by_text(page, "空き状況の確認", exact=False)
+    step = "トップページ"
     try:
-        ca.click_by_text(page, "施設の空き状況", exact=False, timeout_ms=4000)
-    except Exception:
-        pass
-    ca.click_by_text(page, "施設選択", exact=False, timeout_ms=10000)
-    ca.click_by_text(page, building, exact=True, timeout_ms=10000)
-    for txt in ("決定", "OK"):
+        ca.goto_with_retry(page, ca.BASE_URL)
+        page.wait_for_timeout(1200)
+        step = "空き状況の確認"
+        ca.click_by_text(page, "空き状況の確認", exact=False)
+        page.wait_for_timeout(1000)
+        step = "施設の空き状況(タブ)"
         try:
-            ca.click_by_text(page, txt, exact=True, timeout_ms=1500)
+            ca.click_by_text(page, "施設の空き状況", exact=False, timeout_ms=4000)
+            page.wait_for_timeout(1000)
+        except Exception:
+            print("[診断] 「施設の空き状況」は押さずに進みます")
+        step = "施設選択"
+        try:
+            ca.click_by_text(page, "施設選択", exact=False, timeout_ms=4000)
+            page.wait_for_timeout(800)
+        except Exception:
+            print("[診断] 「施設選択」は見つからないので、建物名を直接探します")
+        step = building
+        ca.click_by_text(page, building, exact=True, timeout_ms=10000)
+        for txt in ("決定", "OK"):
+            try:
+                ca.click_by_text(page, txt, exact=True, timeout_ms=1500)
+            except Exception:
+                pass
+        page.wait_for_timeout(1500)
+        step = "本日"
+        try:
+            ca.click_by_text(page, "本日", exact=False, timeout_ms=3000)
+            page.wait_for_timeout(1000)
         except Exception:
             pass
-    page.wait_for_timeout(1500)
-    try:
-        ca.click_by_text(page, "本日", exact=False, timeout_ms=3000)
-        page.wait_for_timeout(1000)
-    except Exception:
-        pass
-    cur, marks = parse_day_view(ca.safe_content(page))
-    if cur is None or not marks:
+        step = "表の確認"
+        cur, marks = parse_day_view(ca.safe_content(page))
+        if cur is None or not marks:
+            raise RuntimeError("柔道場の行または日付が見つかりません")
+        return cur
+    except Exception as e:
+        print(f"[診断] 日付別の画面で止まった手順: {step}")
         show_labels(page)
-        raise RuntimeError("日付別の空き状況の画面に到達できませんでした")
-    return cur
+        raise RuntimeError(f"日付別の空き状況の画面に到達できませんでした({step}): {e}")
 
 
 def _click_step(page, cur: date, label: str):
