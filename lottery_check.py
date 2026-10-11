@@ -95,8 +95,20 @@ def collect_slots(rows_per_account):
     return lost, secured, counter
 
 
+def search_start(year: int, month: int) -> date:
+    """その月の枠を検索し始める日 = 前月の1日(抽選の後、先着の受付が始まる日)。"""
+    y, m = (year - 1, 12) if month == 1 else (year, month - 1)
+    return date(y, m, 1)
+
+
 def pick_targets(lost, secured, today: date):
-    return sorted(k for k in lost if k not in secured and date(k[0], k[1], k[2]) >= today)
+    """落選していて、確保済みでなく、検索開始日を過ぎていて、まだ過ぎていない枠。"""
+    return sorted(
+        k for k in lost
+        if k not in secured
+        and date(k[0], k[1], k[2]) >= today
+        and today >= search_start(k[0], k[1])
+    )
 
 
 def parse_available_by_date(html: str, pattern=None):
@@ -486,7 +498,10 @@ def main():
         lost, secured, counter = collect_slots(rows_per_account)
         print(f"[集計] 総合体育館(柔道場/柔剣道場)の状況別件数: {dict(counter)}")
         targets = pick_targets(lost, secured, today)
-        print(f"[集計] 落選 {len(lost)} 枠 / 確保済み {len(secured)} 枠 / 検索対象 {len(targets)} 枠")
+        waiting = [k for k in lost if k not in secured and today < search_start(k[0], k[1])]
+        print(f"[集計] 落選 {len(lost)} 枠 / 確保済み {len(secured)} 枠 / 検索対象 {len(targets)} 枠 / 検索開始前 {len(waiting)} 枠")
+        for k in sorted(waiting):
+            print(f"  検索開始前: {label(k)}(開始日 {search_start(k[0], k[1])})")
         for k in targets:
             print(f"  対象: {label(k)}")
 
