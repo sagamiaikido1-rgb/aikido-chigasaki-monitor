@@ -269,6 +269,144 @@ def read_availability(browser, attempts=3):
     raise last
 
 
+
+# ---------------------------------------------------------------- 日付別の空き状況(「施設の空き状況」画面)
+# 画面の上にある「1ヶ月後/1週間後/1日後」ボタンで日付を動かし、柔道場の行を読む。
+# ログイン不要。「期間の空き状況」の表に載らない遠い日付を調べるために使う。
+
+PAGE_DATE_RE = DATE_RE
+
+
+def parse_day_view(html: str, room: str = "柔道場"):
+    """日付別の表のHTMLから (表示中の日付, {時刻(整数): 記号}) を返す。
+    見つからなければ (None, {}) 。"""
+    text = cell_text(html)
+    dm = PAGE_DATE_RE.search(text)
+    cur = date(int(dm.group(1)), int(dm.group(2)), int(dm.group(3))) if dm else None
+
+    start_hour = 8
+    marks = {}
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
+        cells = re.findall(r"<t([dh])([^>]*)>(.*?)</t[dh]>", tr, re.IGNORECASE | re.DOTALL)
+        if not cells:
+            continue
+        texts = [cell_text(c[2]) for c in cells]
+        # 見出し行(「施設」+ 時刻の数字)から開始時刻を取る
+        if texts[0] == "施設" and len(texts) > 1 and texts[1].isdigit():
+            start_hour = int(texts[1])
+            continue
+        if texts[0] != room:
+            continue
+        col = start_hour
+        marks = {}
+        for (_, attrs, inner) in cells[1:]:
+            m = re.search(r"colspan\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE)
+            span = int(m.group(1)) if m else 1
+            mark = cell_text(inner)
+            for h in range(col, col + span):
+                marks[h] = mark
+            col += span
+        break
+    return cur, marks
+
+
+def day_slot_available(marks, start: str, end: str) -> bool:
+    """開始〜終了(例 '1800','2100')の時間帯が空きか。○があり、×がなければ空き。"""
+    hours = range(int(start[:2]), int(end[:2]))
+    seen = {marks.get(h, "") for h in hours}
+    return "○" in seen and "×" not in seen
+
+
+def _add_months(d: date, n: int) -> date:
+    y, m = d.year, d.month + n
+    y += (m - 1) // 12
+    m = (m - 1) % 12 + 1
+    return date(y, m, min(d.day, 28)) if d.day > 28 else date(y, m, d.day)
+
+
+def open_day_view(page, building="総合体育館"):
+    ca.goto_with_retry(page, ca.BASE_URL)
+    page.wait_for_timeout(1200)
+    ca.click_by_text(page, "空き状況の確認", exact=False)
+    try:
+        ca.click_by_text(page, "施設の空き状況", exact=False, timeout_ms=4000)
+    except Exception:
+        pass
+    ca.click_by_text(page, "施設選択", exact=False, timeout_ms=10000)
+    ca.click_by_text(page, building, exact=True, timeout_ms=10000)
+    for txt in ("決定", "OK"):
+        try:
+            ca.click_by_text(page, txt, exact=True, timeout_ms=1500)
+        except Exception:
+            pass
+    page.wait_for_timeout(1500)
+    try:
+        ca.click_by_text(page, "本日", exact=False, timeout_ms=3000)
+        page.wait_for_timeout(1000)
+    except Exception:
+        pass
+    cur, marks = parse_day_view(ca.safe_content(page))
+    if cur is None or not marks:
+        show_labels(page)
+        raise RuntimeError("日付別の空き状況の画面に到達できませんでした")
+    return cur
+
+
+def _click_step(page, cur: date, label: str):
+    ca.click_by_text(page, label, exact=False, timeout_ms=8000)
+    for _ in range(10):
+        page.wait_for_timeout(600)
+        new, marks = parse_day_view(ca.safe_content(page))
+        if new is not None and new != cur:
+            return new
+    raise RuntimeError(f"「{label}」を押しても日付が変わりませんでした")
+
+
+def goto_date(page, cur: date, target: date):
+    for _ in range(40):
+        if cur == target:
+            return cur
+        if cur < target:
+            if _add_months(cur, 1) <= target and (target - cur).days >= 28:
+                cur = _click_step(page, cur, "1ヶ月後")
+            elif (target - cur).days >= 7:
+                cur = _click_step(page, cur, "1週間後")
+            else:
+                cur = _click_step(page, cur, "1日後")
+        else:
+            if _add_months(cur, -1) >= target and (cur - target).days >= 28:
+                cur = _click_step(page, cur, "1ヶ月前")
+            elif (cur - target).days >= 7:
+                cur = _click_step(page, cur, "1週間前")
+            else:
+                cur = _click_step(page, cur, "1日前")
+    raise RuntimeError("目的の日付に移動できませんでした")
+
+
+def read_day_view_targets(browser, targets, attempts=2):
+    """targets: [(年,月,日,開始,終了)] → [(枠, '空きあり'/'空きなし')]"""
+    last = None
+    for n in range(1, attempts + 1):
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        try:
+            cur = open_day_view(page)
+            out = []
+            for k in sorted(targets):
+                cur = goto_date(page, cur, date(k[0], k[1], k[2]))
+                _, marks = parse_day_view(ca.safe_content(page))
+                ok = day_slot_available(marks, k[3], k[4])
+                print(f"  [日付別] {label(k)} 柔道場の行: {dict(sorted(marks.items()))}")
+                out.append((k, "空きあり" if ok else "空きなし"))
+            return out
+        except Exception as e:
+            last = e
+            print(f"[デバッグ] 日付別の空き状況の取得に失敗(試行{n}/{attempts}): {e}")
+        finally:
+            ctx.close()
+    raise last
+
+
 # ---------------------------------------------------------------- 本体
 
 def main():
@@ -314,6 +452,15 @@ def main():
             except Exception as e:
                 failed += 1
                 print(f"[エラー] 空き状況の取得に失敗しました: {e}")
+        # 「期間の空き状況」の表に載っていない日付は、日付別の画面で調べ直す
+        outside = [k for k, r in results if r == "範囲外"]
+        if outside:
+            try:
+                extra = dict(read_day_view_targets(browser, outside))
+                results = [(k, extra.get(k, r)) for k, r in results]
+            except Exception as e:
+                failed += 1
+                print(f"[エラー] 日付別の空き状況の取得に失敗しました: {e}")
         browser.close()
 
     for k, r in results:
