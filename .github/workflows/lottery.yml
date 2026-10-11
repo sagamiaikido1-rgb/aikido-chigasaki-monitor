@@ -1,0 +1,36 @@
+name: 合気道 落選枠の空きチェック
+
+on:
+  schedule:
+    - cron: 15 0 * * *
+    - cron: 30 13 * * *
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 1=テスト(メールを送らない) 0=本番
+        default: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - name: 実行
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ID_2: ${{ secrets.AIKIDO_ID_2 }}
+          AIKIDO_PASS_2: ${{ secrets.AIKIDO_PASS_2 }}
+          AIKIDO_ID_3: ${{ secrets.AIKIDO_ID_3 }}
+          AIKIDO_PASS_3: ${{ secrets.AIKIDO_PASS_3 }}
+          AIKIDO_ID_4: ${{ secrets.AIKIDO_ID_4 }}
+          AIKIDO_PASS_4: ${{ secrets.AIKIDO_PASS_4 }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || '1' }}
+        run: python lottery_check.py
