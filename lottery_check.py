@@ -310,11 +310,28 @@ def parse_day_view(html: str, room: str = "柔道場"):
     return cur, marks
 
 
-def day_slot_available(marks, start: str, end: str) -> bool:
-    """開始〜終了(例 '1800','2100')の時間帯が空きか。○があり、×がなければ空き。"""
+def day_slot_available(marks, start: str, end: str):
+    """開始〜終了(例 '1800','2100')の時間帯が空きか。
+    ○があり×がなければ True、×があれば False。
+    対象の時刻の記号が1つも読めていなければ None(判定できない)。"""
     hours = range(int(start[:2]), int(end[:2]))
+    if not any(h in marks for h in hours):
+        return None
     seen = {marks.get(h, "") for h in hours}
-    return "○" in seen and "×" not in seen
+    if "○" in seen and "×" not in seen:
+        return True
+    if "×" in seen:
+        return False
+    return None
+
+
+def day_row_html(html: str, room: str = "柔道場") -> str:
+    """診断用:指定の施設の行のHTMLを、短くして返す。"""
+    for tr in re.findall(r"<tr[^>]*>.*?</tr>", html, re.IGNORECASE | re.DOTALL):
+        first = re.search(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.IGNORECASE | re.DOTALL)
+        if first and cell_text(first.group(1)) == room:
+            return re.sub(r"\s+", " ", tr)[:3000]
+    return ""
 
 
 def _add_months(d: date, n: int) -> date:
@@ -414,7 +431,9 @@ def read_day_view_targets(browser, targets, attempts=2):
                 _, marks = parse_day_view(ca.safe_content(page))
                 ok = day_slot_available(marks, k[3], k[4])
                 print(f"  [日付別] {label(k)} 柔道場の行: {dict(sorted(marks.items()))}")
-                out.append((k, "空きあり" if ok else "空きなし"))
+                if ok is None:
+                    print(f"  [診断] 行のHTML: {day_row_html(ca.safe_content(page))}")
+                out.append((k, {True: "空きあり", False: "空きなし", None: "判定不能"}[ok]))
             return out
         except Exception as e:
             last = e
@@ -482,6 +501,9 @@ def main():
 
     for k, r in results:
         print(f"  判定: {label(k)} → {r}")
+    if any(r == "判定不能" for _, r in results):
+        failed += 1
+        print("[エラー] 読み取れず判定できない枠があります(上の診断を確認してください)")
 
     found = [k for k, r in results if r == "空きあり"]
     if found:
