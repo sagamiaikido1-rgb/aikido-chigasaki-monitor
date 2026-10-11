@@ -297,15 +297,25 @@ def parse_day_view(html: str, room: str = "柔道場"):
             continue
         if texts[0] != room:
             continue
-        col = start_hour
+        # 実際の表は「8時の空白セル → 3時間ごとの枠(9-12,12-15,15-18,18-21) → 21時の空白セル」。
+        # ○の枠には setAppStatus(..., '18002100', ...) のように時間帯が書かれているので、それを優先し、
+        # ×など書かれていない枠は、並び順(3時間ずつ)から時刻を決める。
         marks = {}
+        cur_h = start_hour
         for (_, attrs, inner) in cells[1:]:
-            m = re.search(r"colspan\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE)
-            span = int(m.group(1)) if m else 1
             mark = cell_text(inner)
-            for h in range(col, col + span):
+            if mark == "":
+                if cur_h == start_hour:
+                    cur_h += 1  # 先頭の8時の空白セル
+                continue
+            rm = re.search(r"setAppStatus\([^)]*?'(\d{2})\d{2}(\d{2})\d{2}'", attrs)
+            if rm:
+                s_h, e_h = int(rm.group(1)), int(rm.group(2))
+            else:
+                s_h, e_h = cur_h, cur_h + 3
+            for h in range(s_h, e_h):
                 marks[h] = mark
-            col += span
+            cur_h = e_h
         break
     return cur, marks
 
