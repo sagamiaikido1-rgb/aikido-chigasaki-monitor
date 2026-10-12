@@ -8,7 +8,7 @@ on:
     inputs:
       dry_run:
         description: 1=テスト(メールを送らない) 0=本番
-        default: "1"
+        default: "0"
 
 jobs:
   check:
