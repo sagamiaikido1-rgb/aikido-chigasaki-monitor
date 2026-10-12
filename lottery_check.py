@@ -159,8 +159,10 @@ def target_months(today: date):
     return months
 
 
-def parse_accounts_text(text: str):
-    """複数行の「ID パスワード」(区切りは空白かカンマ)を [(ID, パスワード)] にする。"""
+def parse_accounts_text(text: str, default_pw: str = ""):
+    """複数行を [(ID, パスワード)] にする。
+    「ID パスワード」(区切りは空白かカンマ)でも、「ID」だけでも書ける。
+    IDだけの行は default_pw(= AIKIDO_PASS_1)を使う。"""
     out = []
     for line in (text or "").splitlines():
         line = line.strip()
@@ -169,6 +171,8 @@ def parse_accounts_text(text: str):
         parts = re.split(r"[,\s]+", line, maxsplit=1)
         if len(parts) == 2 and parts[0] and parts[1].strip():
             out.append((parts[0], parts[1].strip()))
+        elif len(parts) == 1 and parts[0] and default_pw:
+            out.append((parts[0], default_pw))
     return out
 
 
@@ -181,7 +185,8 @@ def load_accounts(env=None):
         pw = env.get(f"AIKIDO_PASS_{i}", "").strip()
         if uid and pw:
             pairs.append((uid, pw))
-    pairs += parse_accounts_text(env.get("AIKIDO_ACCOUNTS", ""))
+    default_pw = env.get("AIKIDO_PASS_1", "").strip()
+    pairs += parse_accounts_text(env.get("AIKIDO_ACCOUNTS", ""), default_pw)
     seen, accounts = set(), []
     for uid, pw in pairs:
         if uid in seen:
