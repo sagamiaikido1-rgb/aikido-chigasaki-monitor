@@ -112,6 +112,15 @@ def main():
     from playwright.sync_api import sync_playwright
 
     ym = os.environ.get("SUMMARY_MONTH", "").strip()
+    if not ym:  # 自動実行: 日本時間の今日から見て「2か月先」の月
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        t = datetime.now(ZoneInfo("Asia/Tokyo"))
+        y, m = t.year, t.month + 2
+        if m > 12:
+            y, m = y + 1, m - 12
+        ym = f"{y}-{m:02d}"
+        print(f"[自動] 対象月を {ym} にしました")
     try:
         year, month = (int(x) for x in ym.split("-"))
         assert 1 <= month <= 12
