@@ -59,6 +59,7 @@ def parse_lottery_rows(html: str):
             continue
         rows.append({
             "status": cells[0],
+            "facility": cells[3] if len(cells) > 3 else "",
             "year": int(d.group(1)),
             "month": int(d.group(2)),
             "day": int(d.group(3)),
@@ -532,6 +533,10 @@ def main():
         print(f"[集計] 落選 {len(lost)} 枠 / 確保済み {len(secured)} 枠 / 検索対象 {len(targets)} 枠 / 検索開始前 {len(waiting)} 枠")
         for k in sorted(waiting):
             print(f"  検索開始前: {label(k)}(開始日 {search_start(k[0], k[1])})")
+        for k in sorted(secured):
+            print(f"  確保済み: {label(k)}")
+        for k in sorted(lost - secured):
+            print(f"  全IDで落選: {label(k)}")
         for k in targets:
             print(f"  対象: {label(k)}")
 
