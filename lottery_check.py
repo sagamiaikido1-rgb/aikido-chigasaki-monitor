@@ -17,6 +17,7 @@
 import os
 import re
 import sys
+import time
 from collections import Counter
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -158,13 +159,35 @@ def target_months(today: date):
     return months
 
 
-def load_accounts():
-    accounts = []
+def parse_accounts_text(text: str):
+    """複数行の「ID パスワード」(区切りは空白かカンマ)を [(ID, パスワード)] にする。"""
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = re.split(r"[,\s]+", line, maxsplit=1)
+        if len(parts) == 2 and parts[0] and parts[1].strip():
+            out.append((parts[0], parts[1].strip()))
+    return out
+
+
+def load_accounts(env=None):
+    """AIKIDO_ID_1/AIKIDO_PASS_1 と、AIKIDO_ACCOUNTS(1行に1組)を合わせて返す。同じIDは1回だけ。"""
+    env = os.environ if env is None else env
+    pairs = []
     for i in range(1, 11):
-        uid = os.environ.get(f"AIKIDO_ID_{i}", "").strip()
-        pw = os.environ.get(f"AIKIDO_PASS_{i}", "").strip()
+        uid = env.get(f"AIKIDO_ID_{i}", "").strip()
+        pw = env.get(f"AIKIDO_PASS_{i}", "").strip()
         if uid and pw:
-            accounts.append((i, uid, pw))
+            pairs.append((uid, pw))
+    pairs += parse_accounts_text(env.get("AIKIDO_ACCOUNTS", ""))
+    seen, accounts = set(), []
+    for uid, pw in pairs:
+        if uid in seen:
+            continue
+        seen.add(uid)
+        accounts.append((len(accounts) + 1, uid, pw))
     return accounts
 
 
@@ -487,6 +510,8 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         for (i, uid, pw) in accounts:
+            if i > 1:
+                time.sleep(3)  # 続けて何度もログインしないよう、少し間隔をあける
             try:
                 rows = read_account_with_retry(uid, pw, months, browser)
                 rows_per_account.append(rows)
