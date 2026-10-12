@@ -258,7 +258,21 @@ def click_option(page, kind, value):
         return False
 
 
+def read_month_rows(page, months, source):
+    """画面の年月を順に切り替え、表の行を読む。source は 'lottery'(抽選)か 'reserved'(予約)。"""
+    rows_all = []
+    for (y, m) in months:
+        click_option(page, "year", y)
+        click_option(page, "month", m)
+        page.wait_for_timeout(1000)
+        for r in parse_lottery_rows(ca.safe_content(page)):
+            r["source"] = source
+            rows_all.append(r)
+    return rows_all
+
+
 def read_account(page, uid, pw, months):
+    """1つのIDの「抽選申込一覧」と「予約申込一覧」を読む(手動で予約した分も予約申込一覧に載る)。"""
     login(page, uid, pw)
     try:
         ca.click_by_text(page, "マイページ", exact=False, timeout_ms=8000)
@@ -266,14 +280,11 @@ def read_account(page, uid, pw, months):
         pass
     go_menu_item(page, "抽選申込一覧")
     page.wait_for_timeout(1500)
+    rows_all = read_month_rows(page, months, "lottery")
 
-    rows_all = []
-    for (y, m) in months:
-        click_option(page, "year", y)
-        click_option(page, "month", m)
-        page.wait_for_timeout(1000)
-        rows = parse_lottery_rows(ca.safe_content(page))
-        rows_all.extend(rows)
+    go_menu_item(page, "予約申込一覧")
+    page.wait_for_timeout(1500)
+    rows_all += read_month_rows(page, months, "reserved")
     return rows_all
 
 
@@ -521,7 +532,8 @@ def main():
             try:
                 rows = read_account_with_retry(uid, pw, months, browser)
                 rows_per_account.append(rows)
-                print(f"[ID{i}] 抽選申込 {len(rows)} 件を読み取りました")
+                n_res = sum(1 for r in rows if r.get("source") == "reserved")
+                print(f"[ID{i}] 抽選申込 {len(rows) - n_res} 件・予約 {n_res} 件を読み取りました")
             except Exception as e:
                 failed += 1
                 print(f"[エラー] ID{i} の読み取りに失敗しました({type(e).__name__})")

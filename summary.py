@@ -21,6 +21,7 @@ import check_availability as ca
 import lottery_check as lc
 
 WON_WORDS = ("当選",)
+BOOK_WORDS = ("予約",)
 CANCEL_WORDS = ("取消", "キャンセル", "無効", "取り消し")
 
 
@@ -29,6 +30,8 @@ def classify(status: str) -> str:
         return "取消"
     if any(w in status for w in WON_WORDS):
         return "当選"
+    if any(w in status for w in BOOK_WORDS):
+        return "予約"
     if "落選" in status:
         return "落選"
     if "抽選待ち" in status:
@@ -37,34 +40,44 @@ def classify(status: str) -> str:
 
 
 def build_report(accounts_rows, year: int, month: int):
-    """accounts_rows: [(ID番号, 行のリスト)] → (本文, CSV行のリスト)"""
-    wins, lost, pending, cancelled, others = [], {}, 0, [], []
+    """accounts_rows: [(ID番号, 行のリスト)] → (本文, CSV行のリスト)
+    確保済み = 抽選で当選した枠 + 予約申込一覧にある枠(手動で予約した分を含む)。同じ枠は1つにまとめる。"""
+    secured = {}  # 枠 -> {"fac": 施設, "via": {"当選","予約"}, "ids": {ID番号}}
+    lost, pending, cancelled, others = {}, 0, [], []
     for idx, rows in accounts_rows:
         for r in rows:
             if (r["year"], r["month"]) != (year, month):
                 continue
             kind = classify(r["status"])
             key = lc.slot_key(r)
-            if kind == "当選":
-                wins.append((key, r["facility"], idx))
+            if kind in ("当選", "予約"):
+                e = secured.setdefault(key, {"fac": r["facility"], "via": set(), "ids": set()})
+                e["via"].add(kind)
+                e["ids"].add(idx)
             elif kind == "落選":
                 lost.setdefault(key, set()).add(idx)
             elif kind == "抽選待ち":
                 pending += 1
             elif kind == "取消":
-                cancelled.append((key, r["facility"], idx, r["status"]))
+                cancelled.append((key, r["facility"], idx, r["status"], r.get("source", "lottery")))
             else:
                 others.append((key, r["facility"], idx, r["status"]))
-    wins.sort()
-    won_keys = {k for k, _, _ in wins}
-    lost_only = sorted(k for k in lost if k not in won_keys)
+    lost_only = sorted(k for k in lost if k not in secured)
 
-    lines = [f"{year}年{month}月 抽選結果のまとめ", ""]
-    lines.append(f"■ 当選 {len(wins)}件")
-    for k, fac, idx in wins:
-        lines.append(f"  {lc.label(k)}  {fac}  (ID番号 {idx})")
+    def via_text(via):
+        return "・".join(x for x in ("当選", "予約") if x in via)
+
+    def ids_text(ids):
+        return "ID番号 " + ",".join(str(i) for i in sorted(ids))
+
+    lines = [f"{year}年{month}月 抽選・予約のまとめ", ""]
+    lines.append(f"■ 確保済み(当選または予約) {len(secured)}枠")
+    lines.append("   ※ 当選=抽選で当選 / 予約=予約申込一覧にある(手動で予約した分を含む)")
+    for k in sorted(secured):
+        e = secured[k]
+        lines.append(f"  {lc.label(k)}  {e['fac']}  [{via_text(e['via'])}]  ({ids_text(e['ids'])})")
     lines.append("")
-    lines.append(f"■ 全IDで落選(当選なし) {len(lost_only)}枠")
+    lines.append(f"■ 全IDで落選(確保なし) {len(lost_only)}枠")
     for k in lost_only:
         lines.append(f"  {lc.label(k)}")
     if pending:
@@ -73,7 +86,7 @@ def build_report(accounts_rows, year: int, month: int):
     if cancelled:
         lines.append("")
         lines.append(f"■ 取消 {len(cancelled)}件")
-        for k, fac, idx, st in sorted(cancelled):
+        for k, fac, idx, st, src in sorted(cancelled):
             lines.append(f"  {lc.label(k)}  {fac}  {st}  (ID番号 {idx})")
     if others:
         lines.append("")
@@ -81,13 +94,17 @@ def build_report(accounts_rows, year: int, month: int):
         for k, fac, idx, st in sorted(others):
             lines.append(f"  {lc.label(k)}  {fac}  {st}  (ID番号 {idx})")
 
+    def row_of(k, fac, ids, via, status):
+        d = date(k[0], k[1], k[2])
+        return [d.isoformat(), "月火水木金土日"[d.weekday()], f"{k[3][:2]}:{k[3][2:]}", f"{k[4][:2]}:{k[4][2:]}",
+                fac, ",".join(str(i) for i in sorted(ids)), via, status]
+
     csv_rows = []
-    for k, fac, idx in wins:
-        d = date(k[0], k[1], k[2])
-        csv_rows.append([d.isoformat(), "月火水木金土日"[d.weekday()], f"{k[3][:2]}:{k[3][2:]}", f"{k[4][:2]}:{k[4][2:]}", fac, idx, "当選"])
+    for k in sorted(secured):
+        e = secured[k]
+        csv_rows.append(row_of(k, e["fac"], e["ids"], via_text(e["via"]), "確保済み"))
     for k in lost_only:
-        d = date(k[0], k[1], k[2])
-        csv_rows.append([d.isoformat(), "月火水木金土日"[d.weekday()], f"{k[3][:2]}:{k[3][2:]}", f"{k[4][:2]}:{k[4][2:]}", "", "", "全IDで落選"])
+        csv_rows.append(row_of(k, "", [], "", "全IDで落選"))
     return "\n".join(lines), csv_rows
 
 
@@ -132,7 +149,7 @@ def main():
     path = f"summary/summary_{year}-{month:02d}.csv"
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["日付", "曜日", "開始", "終了", "施設", "ID番号", "状況"])
+        w.writerow(["日付", "曜日", "開始", "終了", "施設", "ID番号", "経路", "状況"])
         w.writerows(csv_rows)
     print(f"\nCSVを保存しました: {path}")
 
