@@ -1,11 +1,13 @@
 name: 合気道 抽選結果まとめ
 
 on:
+  schedule:
+    - cron: "0 21 17 * *"   # UTC17日21:00 = 日本時間18日6:00
   workflow_dispatch:
     inputs:
       month:
-        description: 集計する月(例 2026-11)
-        default: "2026-11"
+        description: 集計する月(例 2026-12)。空欄なら2か月先を自動で選ぶ
+        default: ""
       send_mail:
         description: 1=結果をメールでも送る 0=ログとCSVだけ
         default: "1"
