@@ -12,6 +12,9 @@ on:
         description: 1=結果をメールでも送る 0=ログとCSVだけ
         default: "1"
 
+permissions:
+  contents: write
+
 jobs:
   summary:
     runs-on: ubuntu-latest
@@ -38,3 +41,12 @@ jobs:
         with:
           name: summary
           path: summary/
+      - name: 取込用ファイルを保存(管理画面の抽選取込タブが読み込む)
+        if: always()
+        run: |
+          ls summary/*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add summary/*.json
+          git commit -m "抽選結果まとめ(取込用)を保存" || exit 0
+          git pull --rebase && git push
