@@ -34,7 +34,7 @@ jobs:
           AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
           AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
           SUMMARY_MONTH: ${{ github.event.inputs.month }}
-          SEND_MAIL: ${{ github.event.inputs.send_mail }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
         run: python summary.py
       - uses: actions/upload-artifact@v4
         if: always()
