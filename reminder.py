@@ -62,7 +62,9 @@ def lost_only_slots(accounts_rows, year, month):
     return sorted(k for k in lost if k not in secured)
 
 
-def build_reminder(accounts_rows, year, month, test=False):
+def build_reminder(accounts_rows, year, month, test=False, who=None):
+    if who is None:  # ログ用(番号だけ)
+        who = lambda i: f"ID番号 {i}"  # noqa: E731
     bundles = bundle_only_slots(accounts_rows, year, month)
     lost = lost_only_slots(accounts_rows, year, month)
     head = f"{month}月分の先着受付が始まる日のお知らせです。"
@@ -72,7 +74,7 @@ def build_reminder(accounts_rows, year, month, test=False):
     lines.append(f"■ 柔剣道場のまま確保している枠 {len(bundles)}枠")
     lines.append("   柔道場だけに取り直す(取消+柔道場のみ再予約)かどうか、ご確認ください。")
     for k, ids in bundles:
-        lines.append(f"  {lc.label(k)}  総合体育館 柔剣道場  (ID番号 {','.join(str(i) for i in ids)})")
+        lines.append(f"  {lc.label(k)}  総合体育館 柔剣道場  ({'、'.join(who(i) for i in ids)})")
     if not bundles:
         lines.append("  (なし)")
     lines.append("")
@@ -82,7 +84,7 @@ def build_reminder(accounts_rows, year, month, test=False):
         lines.append(f"  {lc.label(k)}")
     if not lost:
         lines.append("  (なし)")
-    body, _ = sm.build_report(accounts_rows, year, month)
+    body, _ = sm.build_report(accounts_rows, year, month, who=who)
     return "\n".join(lines) + "\n\n――― 参考:" + body
 
 
@@ -124,11 +126,17 @@ def main():
                 print(f"[エラー] ID{i} の読み取りに失敗しました({type(e).__name__})")
         browser.close()
 
-    text = build_reminder(accounts_rows, year, month, test=force and today.day != 1)
+    test = force and today.day != 1
+    text = build_reminder(accounts_rows, year, month, test=test)
+    names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _pw) in accounts}
+    mail = build_reminder(accounts_rows, year, month, test=test, who=lambda i: lc.who_label(i, names.get(i, "")))
     if failed:
-        text += "\n\n※ 読み取れなかったID番号: " + ", ".join(str(i) for i in failed) + "\n  (このIDの結果は含まれていません)"
-    print("\n" + text)
-    ca.send_mail(f"【合気道】{month}月分 先着受付開始のお知らせ", text)
+        note = "\n\n※ 読み取れなかったID: {}\n  (このIDの結果は含まれていません)"
+        text += note.format(", ".join(f"ID番号 {i}" for i in failed))
+        mail += note.format("、".join(lc.who_label(i, names.get(i, "")) for i in failed))
+    mail += "\n\n※ ( )内の数字は、システムに登録したIDの番号です。"
+    print("\n" + text)  # ログには団体名を出さない(公開リポジトリのため)
+    ca.send_mail(f"【合気道】{month}月分 先着受付開始のお知らせ", mail)
     print("メールを送信しました。")
     if failed:
         sys.exit(1)

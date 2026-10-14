@@ -271,11 +271,32 @@ def read_month_rows(page, months, source):
     return rows_all
 
 
+GROUP_NAMES = {}  # ログインID → マイページに出る団体名(メールにだけ使う。ログには出さない)
+_GROUP_RE = re.compile(r"マイページ\s*[:：]+\s*【([^】]{1,40})】")
+
+
+def group_name_from(text: str) -> str:
+    m = _GROUP_RE.search(text or "")
+    return m.group(1).strip() if m else ""
+
+
+def who_label(idx, name: str = "") -> str:
+    """メール用の表示。団体名が分かれば「団体名(番号)」、分からなければ「ID番号 n」。"""
+    return f"{name}({idx})" if name else f"ID番号 {idx}"
+
+
 def read_account(page, uid, pw, months):
     """1つのIDの「抽選申込一覧」と「予約申込一覧」を読む(手動で予約した分も予約申込一覧に載る)。"""
     login(page, uid, pw)
     try:
         ca.click_by_text(page, "マイページ", exact=False, timeout_ms=8000)
+        page.wait_for_timeout(800)
+    except Exception:
+        pass
+    try:
+        name = group_name_from(page.inner_text("body"))
+        if name:
+            GROUP_NAMES[uid] = name
     except Exception:
         pass
     go_menu_item(page, "抽選申込一覧")

@@ -40,7 +40,7 @@ def classify(status: str) -> str:
     return "その他"
 
 
-def build_report(accounts_rows, year: int, month: int):
+def build_report(accounts_rows, year: int, month: int, who=None):
     """accounts_rows: [(ID番号, 行のリスト)] → (本文, CSV行のリスト)
     確保済み = 抽選で当選した枠 + 予約申込一覧にある枠(手動で予約した分を含む)。同じ枠は1つにまとめる。"""
     secured = {}  # 枠 -> {"fac": 施設, "via": {"当選","予約"}, "ids": {ID番号}}
@@ -64,12 +64,14 @@ def build_report(accounts_rows, year: int, month: int):
             else:
                 others.append((key, r["facility"], idx, r["status"]))
     lost_only = sorted(k for k in lost if k not in secured)
+    if who is None:  # ログ用(番号だけ)
+        who = lambda i: f"ID番号 {i}"  # noqa: E731
 
     def via_text(via):
         return "・".join(x for x in ("当選", "予約") if x in via)
 
     def ids_text(ids):
-        return "ID番号 " + ",".join(str(i) for i in sorted(ids))
+        return "、".join(who(i) for i in sorted(ids))
 
     lines = [f"{year}年{month}月 抽選・予約のまとめ", ""]
     lines.append(f"■ 確保済み(当選または予約) {len(secured)}枠")
@@ -88,12 +90,12 @@ def build_report(accounts_rows, year: int, month: int):
         lines.append("")
         lines.append(f"■ 取消 {len(cancelled)}件")
         for k, fac, idx, st, src in sorted(cancelled):
-            lines.append(f"  {lc.label(k)}  {fac}  {st}  (ID番号 {idx})")
+            lines.append(f"  {lc.label(k)}  {fac}  {st}  ({who(idx)})")
     if others:
         lines.append("")
         lines.append(f"■ 要確認(状況が読み取れない) {len(others)}件")
         for k, fac, idx, st in sorted(others):
-            lines.append(f"  {lc.label(k)}  {fac}  {st}  (ID番号 {idx})")
+            lines.append(f"  {lc.label(k)}  {fac}  {st}  ({who(idx)})")
 
     def row_of(k, fac, ids, via, status):
         d = date(k[0], k[1], k[2])
@@ -144,6 +146,10 @@ def main():
     from playwright.sync_api import sync_playwright
 
     ym = os.environ.get("SUMMARY_MONTH", "").strip()
+    if ym in ("names", "名前", "一覧"):  # 月の欄に names と入れると、ID番号と団体名の一覧をメールで送る
+        import id_names
+        id_names.main()
+        return
     if not ym:  # 自動実行: 日本時間の今日から見て「2か月先」の月
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -182,9 +188,14 @@ def main():
         browser.close()
 
     body, csv_rows = build_report(accounts_rows, year, month)
+    names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _pw) in accounts}
+    mail_body, _ = build_report(accounts_rows, year, month, who=lambda i: lc.who_label(i, names.get(i, "")))
     if failed:
-        body += "\n\n※ 読み取れなかったID番号: " + ", ".join(str(i) for i in failed) + "\n  (このIDの結果は含まれていません)"
-    print("\n" + body)
+        note = "\n\n※ 読み取れなかったID: {}\n  (このIDの結果は含まれていません)"
+        body += note.format(", ".join(f"ID番号 {i}" for i in failed))
+        mail_body += note.format("、".join(lc.who_label(i, names.get(i, "")) for i in failed))
+    mail_body += "\n\n※ ( )内の数字は、システムに登録したIDの番号です。"
+    print("\n" + body)  # ログには団体名を出さない(公開リポジトリのため)
 
     os.makedirs("summary", exist_ok=True)
     path = f"summary/summary_{year}-{month:02d}.csv"
@@ -202,7 +213,7 @@ def main():
     print(f"取込用ファイルを保存しました: 確保済み {len(data['secured'])}枠 / 全IDで落選 {len(data['lost'])}枠")
 
     if os.environ.get("SEND_MAIL", "1") == "1":
-        ca.send_mail(f"【合気道】{month}月 抽選結果まとめ", body)
+        ca.send_mail(f"【合気道】{month}月 抽選結果まとめ", mail_body)
         print("メールを送信しました。")
 
     if failed:
