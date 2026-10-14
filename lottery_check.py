@@ -277,7 +277,8 @@ _GROUP_RE = re.compile(r"マイページ\s*[:：]+\s*【([^】]{1,40})】")
 
 def group_name_from(text: str) -> str:
     m = _GROUP_RE.search(text or "")
-    return m.group(1).strip() if m else ""
+    # 「合気会　・　茅ヶ崎支部」のような空白(全角・半角)を詰めて「合気会・茅ヶ崎支部」にする
+    return re.sub(r"[\s\u3000]+", "", m.group(1)) if m else ""
 
 
 def who_label(idx, name: str = "") -> str:
