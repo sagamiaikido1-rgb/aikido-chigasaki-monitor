@@ -98,9 +98,9 @@ def fs_get(ym, token):
     return {k: decode(v) for k, v in r.get("fields", {}).items()}
 
 
-def fs_update(ym, fields, token):
+def fs_update(ym, fields, token, collection=COLLECTION):
     mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
-    _http("PATCH", f"{FS_BASE}/{COLLECTION}/{ym}?key={API_KEY}&{mask}",
+    _http("PATCH", f"{FS_BASE}/{collection}/{ym}?key={API_KEY}&{mask}",
           {"fields": {k: encode(v) for k, v in fields.items()}}, token=token)
 
 

@@ -384,6 +384,25 @@ def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, we
     }
 
 
+def save_names_to_admin(names):
+    """管理画面に番号と団体名の対応を渡す(Firestore の lottery_settings/names。管理者ログインが必要な場所)。
+    公開リポジトリには団体名を置かないため、この方法にしている。"""
+    if not os.environ.get("FIREBASE_EMAIL"):
+        print("[団体名] FIREBASE_EMAIL が未登録のため、管理画面への団体名の保存は省略します")
+        return
+    try:
+        import register as rg
+        token = rg.sign_in()
+        known = {str(i): n for i, n in names.items() if n}
+        if not known:
+            return
+        rg.fs_update("names", {"names": known, "updated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M")},
+                     token, collection="lottery_settings")
+        print(f"[団体名] 管理画面用に {len(known)}件を保存しました")
+    except Exception as e:
+        print(f"[団体名] 保存に失敗しました({type(e).__name__})")
+
+
 def send_mail_with_file(subject, body, filename, data):
     user = os.environ["GMAIL_USER"]
     msg = MIMEMultipart()
@@ -552,6 +571,7 @@ def main():
         print(f"[案] {slot_label(sl)}: {len(assign[s])}件")
 
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
+    save_names_to_admin(names)
     data, total = build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp,
                                  slot_hist, per_id, new_ids, excluded, weight_new)
     print(f"確保できる日数の見込み: {total:.1f} / {len(slots)} 日")

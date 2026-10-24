@@ -45,6 +45,8 @@ jobs:
           AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
           AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
           AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           PLAN_MONTH: ${{ github.event.inputs.month }}
           NEW_IDS: ${{ github.event.inputs.new_ids }}
           EXCLUDE_IDS: ${{ github.event.inputs.exclude_ids }}
