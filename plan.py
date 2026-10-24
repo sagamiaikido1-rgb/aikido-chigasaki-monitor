@@ -357,6 +357,7 @@ def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, we
         "generated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
         "cap": cap, "new_ids": sorted(new_ids), "excluded_ids": sorted(excluded), "new_weight": weight_new,
         "competitors": {slots[s][0].isoformat() + " " + slots[s][3]: round(comp_list[s], 1) for s in range(len(slots))},
+        "slots": [sl[0].isoformat() + " " + sl[1] + "-" + sl[2] for sl in slots],
         "applications": {k: sorted(v) for k, v in by_id.items()},
     }
 

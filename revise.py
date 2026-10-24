@@ -213,8 +213,9 @@ def main():
                    "from": f"{mv['from'][0].isoformat()} {mv['from'][1]}-{mv['from'][2]}" if mv["from"] else None,
                    "to": f"{mv['to'][0].isoformat()} {mv['to'][1]}-{mv['to'][2]}"} for mv in moves],
     }
-    with open(f"plan/revise_{today.isoformat()}.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
+    for name in (f"plan/revise_{today.isoformat()}.json", "plan/revise_latest.json"):
+        with open(name, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
 
     if os.environ.get("SEND_MAIL", "1") == "1":
         subject = f"【合気道】{month}月分 抽選 " + (f"修正案{len(moves)}件" if moves else "修正不要") + f"({today.month}/{today.day})"

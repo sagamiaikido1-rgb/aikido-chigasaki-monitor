@@ -1,0 +1,47 @@
+name: 合気道 抽選申込の登録(管理画面の確定を受けて)
+
+on:
+  schedule:
+    - cron: "11,41 * 1-15,28-31 * *"   # 30分おきに管理画面の確定を確認(申込期間の前後のみ)
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 対象月(例 2027-01)。空欄なら申込期間中の月
+        default: ""
+
+concurrency:
+  group: register
+  cancel-in-progress: false
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: 管理画面で確定されたか確認
+        id: check
+        env:
+          FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
+          REGISTER_MONTH: ${{ github.event.inputs.month }}
+        run: python register.py check
+      - if: steps.check.outputs.run == '1'
+        run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - name: 登録(いまは確認のみ)
+        if: steps.check.outputs.run == '1'
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
+          REGISTER_MONTH: ${{ steps.check.outputs.month }}
+          REGISTER_MODE: dry
+        run: python register.py run
