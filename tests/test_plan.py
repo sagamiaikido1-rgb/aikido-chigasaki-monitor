@@ -61,3 +61,11 @@ H = ("<table><tr><th>施設</th><th>8</th><th>9</th></tr>"
      "<tr><td>1/12 (火)</td><td colspan='13'>休館</td></tr></table>")
 assert plan.parse_closed_days(H, 2027) == {date(2027, 1, 1), date(2027, 1, 3), date(2027, 1, 12)}
 print("closed ok")
+assert plan.fallback_cap(2026, 10) == 5 and plan.fallback_cap(2026, 11) == 4 and plan.fallback_cap(2026, 12) == 4
+assert plan.fallback_cap(2027, 1, {date(2027,1,1), date(2027,1,2), date(2027,1,3), date(2027,1,12)}) == 4
+assert plan.parse_cap("<p>1月分の申込上限は 4件 です</p>") == 4
+assert plan.parse_cap("<p>申込可能件数：４件</p>") == 4
+assert plan.parse_cap("<p>お一人様 5回まで</p>") == 5
+assert plan.parse_cap("<p>1月分の抽選申し込みは11月1日からです。</p>") is None
+assert plan.cap_for((2027, 1), None, 3, "") == 3 and plan.cap_for((2027, 1), None, 3, "2") == 2
+print("cap ok")
