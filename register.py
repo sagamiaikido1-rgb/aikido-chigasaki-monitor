@@ -40,6 +40,18 @@ def _http(method, url, body=None, token=None):
         return json.loads(r.read().decode() or "{}")
 
 
+def err_text(e):
+    """エラーの短い説明(HTTPなら番号と理由。パスワードなどは含まない)。"""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            body = json.loads(e.read().decode() or "{}")
+            msg = (body.get("error") or {}).get("message") or (body.get("error") or {}).get("status") or ""
+        except Exception:
+            msg = ""
+        return f"HTTP {e.code} {msg}".strip()
+    return type(e).__name__
+
+
 def sign_in():
     email, pw = os.environ.get("FIREBASE_EMAIL", ""), os.environ.get("FIREBASE_PASSWORD", "")
     if not email or not pw:
@@ -146,6 +158,27 @@ def apply_changes(browser, uid, pw, adds, cancels):
     raise NotImplementedError("自動登録は準備中です")
 
 
+def names_test():
+    """管理画面の団体名(lottery_settings/names)を、ログイン・読み・書きの順に確かめる。"""
+    try:
+        token = sign_in()
+        print("::notice::[診断] 管理者ログイン OK" if token else "::error::[診断] FIREBASE_EMAIL/PASSWORD が未登録")
+    except Exception as e:
+        print(f"::error::[診断] 管理者ログイン 失敗 ({err_text(e)})")
+        return
+    try:
+        r = _http("GET", f"{FS_BASE}/lottery_settings/names?key={API_KEY}", token=token)
+        n = len(decode(r.get("fields", {}).get("names", {"mapValue": {}})) or {})
+        print(f"::notice::[診断] 団体名の読み取り OK({n}件)")
+    except Exception as e:
+        print(f"::warning::[診断] 団体名の読み取り 失敗 ({err_text(e)})")
+    try:
+        fs_update("diag", {"checked_at": datetime.now().isoformat()}, token, collection="lottery_settings")
+        print("::notice::[診断] 書き込み OK")
+    except Exception as e:
+        print(f"::error::[診断] 書き込み 失敗 ({err_text(e)})")
+
+
 def main():
     from zoneinfo import ZoneInfo
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
@@ -155,10 +188,13 @@ def main():
     if not ym:
         print("申込期間(1〜15日)ではないので何もしません")
         return
+    if mode == "names-test":
+        names_test()
+        return
     try:
         token = sign_in()
     except Exception as e:
-        print(f"[エラー] 管理者ログインに失敗しました({type(e).__name__})。Secrets の FIREBASE_EMAIL / FIREBASE_PASSWORD を確認してください")
+        print(f"::error::[エラー] 管理者ログインに失敗しました({err_text(e)})。Secrets の FIREBASE_EMAIL / FIREBASE_PASSWORD を確認してください")
         sys.exit(1)
     doc = fs_get(ym, token)
 

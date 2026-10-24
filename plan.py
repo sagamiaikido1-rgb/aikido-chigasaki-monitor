@@ -389,17 +389,18 @@ def save_names_to_admin(names):
     if not os.environ.get("FIREBASE_EMAIL"):
         print("[団体名] FIREBASE_EMAIL が未登録のため、管理画面への団体名の保存は省略します")
         return
+    import register as rg
     try:
-        import register as rg
         token = rg.sign_in()
         known = {str(i): n for i, n in names.items() if n}
         if not known:
+            print("::warning::[団体名] 団体名が1件も読み取れませんでした")
             return
         rg.fs_update("names", {"names": known, "updated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M")},
                      token, collection="lottery_settings")
-        print(f"[団体名] 管理画面用に {len(known)}件を保存しました")
+        print(f"::notice::[団体名] 管理画面用に {len(known)}件を保存しました")
     except Exception as e:
-        print(f"[団体名] 保存に失敗しました({type(e).__name__})")
+        print(f"::warning::[団体名] 保存に失敗しました({rg.err_text(e)})")
 
 
 def send_mail_with_file(subject, body, filename, data):
