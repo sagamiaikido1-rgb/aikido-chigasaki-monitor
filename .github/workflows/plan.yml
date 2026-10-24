@@ -1,0 +1,51 @@
+name: 合気道 抽選申込案づくり
+
+on:
+  schedule:
+    - cron: "41 22 28 * *"   # UTC28日22:41 = 日本時間29日7:41(翌月1日の申込開始前)
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 申込案を作る月(例 2027-01)。空欄なら次に申し込む月
+        default: ""
+      new_ids:
+        description: 新規ID(当選しやすいとされるID)の番号。例 3,7
+        default: ""
+      exclude_ids:
+        description: 使わないIDの番号。例 5
+        default: ""
+      new_weight:
+        description: 新規IDの重み(1=ほかと同じ、1.5=1.5倍当たりやすいとみなす)
+        default: "1.5"
+      cap:
+        description: 1IDあたりの申込上限。空欄なら候補日を含む週の数
+        default: ""
+      send_mail:
+        description: 1=Excelをメールで送る 0=送らない(テスト)
+        default: "1"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - name: 申込案をつくる
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          PLAN_MONTH: ${{ github.event.inputs.month }}
+          NEW_IDS: ${{ github.event.inputs.new_ids }}
+          EXCLUDE_IDS: ${{ github.event.inputs.exclude_ids }}
+          NEW_WEIGHT: ${{ github.event.inputs.new_weight || '1.5' }}
+          PLAN_CAP: ${{ github.event.inputs.cap }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python plan.py
