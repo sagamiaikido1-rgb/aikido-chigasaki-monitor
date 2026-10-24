@@ -8,6 +8,7 @@
   3. どれか1つのIDで「当選」している枠は除く(すでに確保済みのため)
   4. 残った枠について、柔道場の「期間の空き状況」で ○ が出ていないか調べる
   5. ○ があればメールで知らせる
+  あわせて、日曜を夜で確保している日は、同じ日の朝(9:00-12:00)も探す
 
 安全のため
   - DRY_RUN=1(初期値)の間はメールを送らず、結果をログに出すだけ
@@ -111,6 +112,23 @@ def pick_targets(lost, secured, today: date):
         and date(k[0], k[1], k[2]) >= today
         and today >= search_start(k[0], k[1])
     )
+
+
+SUNDAY_MORNING = ("0900", "1200")   # 合気道の日曜の稽古(朝)
+EVENING_FROM = "1800"                # この時刻以降に始まる枠を「夜」とみなす
+
+
+def sunday_morning_wanted(secured, lost=()):
+    """日曜を夜で確保していて、同じ日の朝を確保していない枠 → その日の朝を探す。
+    (朝に申し込んで落選した日は、すでに落選枠として探しているので除く)"""
+    out = set()
+    for k in secured:
+        if date(k[0], k[1], k[2]).weekday() != 6 or k[3] < EVENING_FROM:
+            continue
+        morning = (k[0], k[1], k[2]) + SUNDAY_MORNING
+        if morning not in secured and morning not in lost:
+            out.add(morning)
+    return out
 
 
 def parse_available_by_date(html: str, pattern=None):
@@ -527,6 +545,21 @@ def read_day_view_targets(browser, targets, attempts=2):
     raise last
 
 
+def build_found_mail(found, mornings) -> str:
+    """空きが出た枠のメール本文。落選枠と「夜を確保中の日曜の朝」を分けて書く。"""
+    lost_found = [k for k in found if k not in mornings]
+    morning_found = [k for k in found if k in mornings]
+    parts = []
+    if lost_found:
+        parts.append("■ 抽選で落選した日時に、空きが出ました。\n使う場合は、早めに予約してください。\n"
+                     + "\n".join(f"・{label(k)}  総合体育館 柔道場" for k in lost_found))
+    if morning_found:
+        parts.append("■ 日曜の朝に、空きが出ました(この日は今、夜を確保しています)。\n"
+                     "朝に移す場合は、朝を予約してから、夜を取り消してください。\n"
+                     + "\n".join(f"・{label(k)}  総合体育館 柔道場" for k in morning_found))
+    return "\n\n".join(parts)
+
+
 # ---------------------------------------------------------------- 本体
 
 def main():
@@ -562,8 +595,9 @@ def main():
 
         lost, secured, counter = collect_slots(rows_per_account)
         print(f"[集計] 総合体育館(柔道場/柔剣道場)の状況別件数: {dict(counter)}")
-        targets = pick_targets(lost, secured, today)
-        waiting = [k for k in lost if k not in secured and today < search_start(k[0], k[1])]
+        mornings = sunday_morning_wanted(secured, lost)
+        targets = sorted(set(pick_targets(lost, secured, today)) | set(pick_targets(mornings, secured, today)))
+        waiting = [k for k in (lost | mornings) if k not in secured and today < search_start(k[0], k[1])]
         print(f"[集計] 落選 {len(lost)} 枠 / 確保済み {len(secured)} 枠 / 検索対象 {len(targets)} 枠 / 検索開始前 {len(waiting)} 枠")
         for k in sorted(waiting):
             print(f"  検索開始前: {label(k)}(開始日 {search_start(k[0], k[1])})")
@@ -571,6 +605,8 @@ def main():
             print(f"  確保済み: {label(k)}")
         for k in sorted(lost - secured):
             print(f"  全IDで落選: {label(k)}")
+        for k in sorted(mornings):
+            print(f"  夜を確保中・朝を探す: {label(k)}")
         for k in targets:
             print(f"  対象: {label(k)}")
 
@@ -601,14 +637,13 @@ def main():
 
     found = [k for k, r in results if r == "空きあり"]
     if found:
-        body = "抽選で落選した日時に、空きが出ました。\n早めに予約してください。\n\n"
-        body += "\n".join(f"・{label(k)}  総合体育館 柔道場" for k in found)
+        body = build_found_mail(found, mornings)
         now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
         body += f"\n\n確認日時: {now} (JST)\n{ca.BASE_URL}"
         if dry_run:
             print("[テスト] 空きあり。テストモードのためメールは送りません。")
         else:
-            ca.send_mail("【合気道】落選した枠に空きが出ました", body)
+            ca.send_mail("【合気道】稽古の枠に空きが出ました", body)
             print("空きあり。メール送信しました。")
     else:
         print("空きなし(または対象なし)。")
