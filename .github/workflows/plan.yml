@@ -1,8 +1,11 @@
 name: 合気道 抽選申込案づくり
 
+permissions:
+  contents: write
+
 on:
   schedule:
-    - cron: "41 22 28 * *"   # UTC28日22:41 = 日本時間29日7:41(翌月1日の申込開始前)
+    - cron: "41 22 17 * *"   # UTC17日22:41 = 日本時間18日7:41(18日0:17の抽選結果まとめの後)
   workflow_dispatch:
     inputs:
       month:
@@ -49,3 +52,12 @@ jobs:
           PLAN_CAP: ${{ github.event.inputs.cap }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
         run: python plan.py
+      - name: 申込案(ID番号と日付のみ)を保存
+        if: success()
+        run: |
+          ls plan/*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add plan/*.json
+          git commit -m "抽選申込案を保存" || exit 0
+          git pull --rebase && git push

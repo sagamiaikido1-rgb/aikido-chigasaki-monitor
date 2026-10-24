@@ -50,3 +50,7 @@ data, total = plan.build_workbook((2027, 1), slots, comp_list, a, ids, {1: "ãƒ†ã
                                   hist, per, {2}, {5}, 1.5)
 assert data[:2] == b"PK" and 0 < total <= len(slots)
 print("ok", sun, wed, round(total, 2))
+j = plan.plan_json((2027, 1), slots, comp_list, a, ids, 5, {2}, {5}, 1.5)
+assert j["applications"]["1"] and all(x.startswith("2027-01-") for v in j["applications"].values() for x in v)
+assert sum(len(v) for v in j["applications"].values()) == sum(len(v) for v in a.values())
+print("json ok")

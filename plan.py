@@ -4,6 +4,7 @@
 
 流れ
   1. 登録してある全IDの「抽選申込一覧」を過去数か月ぶん読む
+     (毎月18日の抽選結果が出たあと〜月末に作る。翌月1日に登録、15日まで競合を見て修正)
   2. 枠ごとに「こちらが何件申し込んで、確保できたか」から、他団体の申込の多さ(推定競合)を見積もる
      (日曜朝・水曜夜で別々に見積もる)
   3. 次の抽選月の全候補日(日曜 9-12時・水曜 18-21時)に、
@@ -344,6 +345,21 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
     return buf.getvalue(), total
 
 
+def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new):
+    """登録作業が読む申込案(ID番号と日付だけ。団体名・ログインIDは含めない)。"""
+    by_id = {str(i): [] for i in ids}
+    for s, lst in assign.items():
+        for i in lst:
+            by_id[str(i)].append(slots[s][0].isoformat() + " " + slots[s][1] + "-" + slots[s][2])
+    return {
+        "year": plan_ym[0], "month": plan_ym[1], "status": "案",
+        "generated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        "cap": cap, "new_ids": sorted(new_ids), "excluded_ids": sorted(excluded), "new_weight": weight_new,
+        "competitors": {slots[s][0].isoformat() + " " + slots[s][3]: round(comp_list[s], 1) for s in range(len(slots))},
+        "applications": {k: sorted(v) for k, v in by_id.items()},
+    }
+
+
 def send_mail_with_file(subject, body, filename, data):
     user = os.environ["GMAIL_USER"]
     msg = MIMEMultipart()
@@ -459,6 +475,14 @@ def main():
               "", "※ 推定競合は過去の当落から見積もった目安です。1日以降は実際の申込件数で見直します。",
               "※ 休館日・行事で使えない日は、代表が○を消してください。"]
     body = "\n".join(lines)
+
+    import json
+    os.makedirs("plan", exist_ok=True)
+    jpath = f"plan/plan_{plan_ym[0]}-{plan_ym[1]:02d}.json"
+    with open(jpath, "w", encoding="utf-8") as f:
+        json.dump(plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new),
+                  f, ensure_ascii=False, indent=1)
+    print(f"申込案を保存しました: {jpath}(ID番号と日付のみ)")
 
     fname = f"申込案_{plan_ym[0]}-{plan_ym[1]:02d}.xlsx"
     if os.environ.get("SEND_MAIL", "1") == "1":
