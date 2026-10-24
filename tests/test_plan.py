@@ -54,3 +54,10 @@ j = plan.plan_json((2027, 1), slots, comp_list, a, ids, 5, {2}, {5}, 1.5)
 assert j["applications"]["1"] and all(x.startswith("2027-01-") for v in j["applications"].values() for x in v)
 assert sum(len(v) for v in j["applications"].values()) == sum(len(v) for v in a.values())
 print("json ok")
+H = ("<table><tr><th>施設</th><th>8</th><th>9</th></tr>"
+     "<tr><td>1/1 (金)</td><td colspan='13'>休館</td></tr>"
+     "<tr><td>1/3 (日)</td><td colspan='13'>休館</td></tr>"
+     "<tr><td>1/4 (月)</td><td></td><td>-</td></tr>"
+     "<tr><td>1/12 (火)</td><td colspan='13'>休館</td></tr></table>")
+assert plan.parse_closed_days(H, 2027) == {date(2027, 1, 1), date(2027, 1, 3), date(2027, 1, 12)}
+print("closed ok")

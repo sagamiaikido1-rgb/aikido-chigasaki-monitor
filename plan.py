@@ -22,6 +22,7 @@
 import io
 import math
 import os
+import re
 import smtplib
 import ssl
 import sys
@@ -373,6 +374,56 @@ def send_mail_with_file(subject, body, filename, data):
         s.sendmail(user, [os.environ["NOTIFY_TO"]], msg.as_string())
 
 
+# ---------------------------------------------------------------- 休館日
+
+_ROW_DATE = re.compile(r"^\s*(\d{1,2})\s*/\s*(\d{1,2})")
+
+
+def parse_closed_days(html, year):
+    """抽選申込画面(月の表)のHTMLから、「休館」と出ている日付の集合を返す。"""
+    closed = set()
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
+        cells = [lc.cell_text(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.IGNORECASE | re.DOTALL)]
+        if not cells:
+            continue
+        m = _ROW_DATE.match(cells[0])
+        if m and any("休館" in c for c in cells[1:]):
+            closed.add(date(year, int(m.group(1)), int(m.group(2))))
+    return closed
+
+
+OPEN_MONTH_JS = """([room, label]) => {
+  const norm = s => (s || '').replace(/[\\s\\u3000]+/g, '');
+  for (const tr of document.querySelectorAll('tr')) {
+    if (!norm(tr.textContent).includes(room)) continue;
+    for (const el of tr.querySelectorAll('a, button, input[type=button], input[type=submit]')) {
+      if (norm(el.innerText || el.value) === label) { el.click(); return true; }
+    }
+  }
+  return false;
+}"""
+
+
+def read_closed_days(browser, uid, pw, year, month):
+    """抽選施設一覧 → 総合体育館 柔道場 の「YYYY年M月」を開き、休館日を読む。読めなければ None。"""
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    try:
+        lc.login(page, uid, pw)
+        lc.go_menu_item(page, "抽選施設一覧")
+        page.wait_for_timeout(1500)
+        if not page.evaluate(OPEN_MONTH_JS, ["総合体育館柔道場", f"{year}年{month}月"]):
+            print("[休館日] 抽選施設一覧で 総合体育館 柔道場 の月ボタンが見つかりませんでした")
+            return None
+        page.wait_for_timeout(2500)
+        return parse_closed_days(lc.ca.safe_content(page), year)
+    except Exception as e:
+        print(f"[休館日] 読み取りに失敗しました({type(e).__name__})")
+        return None
+    finally:
+        ctx.close()
+
+
 # ---------------------------------------------------------------- 実行
 
 def read_lottery_only(browser, uid, pw, months, attempts=3):
@@ -438,6 +489,11 @@ def main():
             except Exception as e:
                 failed.append(i)
                 print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
+        closed = None
+        for (i, uid, pw) in accounts:
+            if i not in failed:
+                closed = read_closed_days(browser, uid, pw, *plan_ym)
+                break
         browser.close()
 
     slot_hist, per_id = summarize_history(accounts_rows)
@@ -445,8 +501,14 @@ def main():
     for b, (c, n, w) in comp.items():
         print(f"[実績] {b}: {n}枠中 {w}枠確保 → 推定競合 {c:.1f}件")
 
-    slots = candidate_slots(*plan_ym)
-    cap = int(os.environ.get("PLAN_CAP", "") or weeks_in_month(slots))
+    all_slots = candidate_slots(*plan_ym)
+    cap = int(os.environ.get("PLAN_CAP", "") or weeks_in_month(all_slots))
+    closed_slots = [sl for sl in all_slots if closed and sl[0] in closed]
+    slots = [sl for sl in all_slots if sl not in closed_slots]
+    if closed is None:
+        print("[休館日] 読めなかったため、休館日を除かずに案を作ります")
+    for sl in closed_slots:
+        print(f"[休館日] {slot_label(sl)} は休館のため除きます")
     comp_list = [comp[s[3]][0] for s in slots]
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
     weights = {i: weight_new for i in new_ids}
@@ -464,6 +526,10 @@ def main():
              f"・確保できる日数の見込み: {total:.1f} / {len(slots)} 日", ""]
     for b, (c, n, w) in comp.items():
         lines.append(f"・過去の{b}: {n}枠中 {w}枠確保(推定競合 {c:.1f}件)")
+    if closed is None:
+        lines.append("・休館日を読み取れませんでした。休館の日は代表が○を消してください")
+    elif closed_slots:
+        lines.append("・休館のため除いた日: " + "、".join(slot_label(sl)[:-1] for sl in closed_slots))
     if new_ids:
         lines.append(f"・新規として重み {weight_new} を付けたID: {', '.join(map(str, sorted(new_ids)))}")
     if excluded:
@@ -473,7 +539,7 @@ def main():
     lines += ["", "「申込案」シートの○を代表が書き換えてください。",
               "「代表の調整欄」に新規ID・使わないIDを書いていただければ、案を作り直せます。",
               "", "※ 推定競合は過去の当落から見積もった目安です。1日以降は実際の申込件数で見直します。",
-              "※ 休館日・行事で使えない日は、代表が○を消してください。"]
+              "※ 休館日はサイトの表から自動で除いています。行事などで使えない日は代表が○を消してください。"]
     body = "\n".join(lines)
 
     import json
