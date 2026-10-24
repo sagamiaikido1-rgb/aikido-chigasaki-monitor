@@ -182,14 +182,14 @@ def names_test():
 def main():
     from zoneinfo import ZoneInfo
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode == "names-test":
+        names_test()
+        return
     today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
     ym = os.environ.get("REGISTER_MONTH", "").strip() or target_month(today)
     out = os.environ.get("GITHUB_OUTPUT")
     if not ym:
         print("申込期間(1〜15日)ではないので何もしません")
-        return
-    if mode == "names-test":
-        names_test()
         return
     try:
         token = sign_in()
