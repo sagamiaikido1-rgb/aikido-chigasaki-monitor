@@ -404,24 +404,34 @@ OPEN_MONTH_JS = """([room, label]) => {
 }"""
 
 
-def read_closed_days(browser, uid, pw, year, month):
-    """抽選施設一覧 → 総合体育館 柔道場 の「YYYY年M月」を開き、休館日を読む。読めなければ None。"""
+def open_lottery_page(page, year, month):
+    """ログイン済みの画面から、抽選施設一覧 → 総合体育館 柔道場 の「YYYY年M月」を開き、HTMLを返す。"""
+    lc.go_menu_item(page, "抽選施設一覧")
+    page.wait_for_timeout(1500)
+    if not page.evaluate(OPEN_MONTH_JS, ["総合体育館柔道場", f"{year}年{month}月"]):
+        raise RuntimeError("抽選施設一覧で 総合体育館 柔道場 の月ボタンが見つかりません")
+    page.wait_for_timeout(2500)
+    return lc.ca.safe_content(page)
+
+
+def read_lottery_page(browser, uid, pw, year, month):
+    """抽選申込画面(月の表)のHTML。読めなければ None。"""
     ctx = browser.new_context()
     page = ctx.new_page()
     try:
         lc.login(page, uid, pw)
-        lc.go_menu_item(page, "抽選施設一覧")
-        page.wait_for_timeout(1500)
-        if not page.evaluate(OPEN_MONTH_JS, ["総合体育館柔道場", f"{year}年{month}月"]):
-            print("[休館日] 抽選施設一覧で 総合体育館 柔道場 の月ボタンが見つかりませんでした")
-            return None
-        page.wait_for_timeout(2500)
-        return parse_closed_days(lc.ca.safe_content(page), year)
+        return open_lottery_page(page, year, month)
     except Exception as e:
-        print(f"[休館日] 読み取りに失敗しました({type(e).__name__})")
+        print(f"[抽選画面] 読み取りに失敗しました({type(e).__name__}: {str(e)[:80]})")
         return None
     finally:
         ctx.close()
+
+
+def read_closed_days(browser, uid, pw, year, month):
+    """休館日の集合。読めなければ None。"""
+    html = read_lottery_page(browser, uid, pw, year, month)
+    return None if html is None else parse_closed_days(html, year)
 
 
 # ---------------------------------------------------------------- 実行

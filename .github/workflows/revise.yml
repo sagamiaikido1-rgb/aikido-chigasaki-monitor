@@ -1,0 +1,63 @@
+name: 合気道 抽選期間中の件数チェック(修正案)
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "41 10 1-15 * *"   # UTC10:41 = 日本時間19:41、毎月1〜15日
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 対象月(例 2027-01)。空欄なら2か月先
+        default: ""
+      new_ids:
+        description: 新規ID(当選しやすいとされるID)の番号。例 3,7
+        default: ""
+      exclude_ids:
+        description: 使わないIDの番号。例 5
+        default: ""
+      new_weight:
+        description: 新規IDの重み
+        default: "1.5"
+      force:
+        description: 1=申込期間外でも実行(テスト)
+        default: "0"
+      send_mail:
+        description: 1=メールで送る 0=送らない(テスト)
+        default: "1"
+
+jobs:
+  revise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - name: 件数を読んで修正案をつくる(申込・取消はしない)
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          PLAN_MONTH: ${{ github.event.inputs.month }}
+          NEW_IDS: ${{ github.event.inputs.new_ids }}
+          EXCLUDE_IDS: ${{ github.event.inputs.exclude_ids }}
+          NEW_WEIGHT: ${{ github.event.inputs.new_weight || '1.5' }}
+          FORCE: ${{ github.event.inputs.force || '0' }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python revise.py
+      - name: 修正案(ID番号と日付のみ)を保存
+        if: success()
+        run: |
+          ls plan/revise_*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add plan/revise_*.json
+          git commit -m "抽選期間中の件数と修正案を保存" || exit 0
+          git pull --rebase && git push
