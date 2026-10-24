@@ -272,8 +272,7 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
             cell = ws.cell(row=r, column=4 + s, value="○" if s in by_id[i] else "")
             if s in by_id[i]:
                 cell.fill = mark
-        last = get_column_letter(3 + len(slots))
-        ws.cell(row=r, column=4 + len(slots), value=f'=COUNTIF(D{r}:{last}{r},"○")')
+        ws.cell(row=r, column=4 + len(slots), value=len(by_id[i]))
         for c in range(1, len(hdr) + 1):
             ws.cell(row=r, column=c).border = box
             if c != 2:
@@ -284,19 +283,19 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
     for lab, _ in labels:
         ws.cell(row=r, column=2, value=lab).font = Font(bold=True)
         for s in range(len(slots)):
-            col = get_column_letter(4 + s)
+            k = len(assign[s])
             if lab == "申込数":
-                v = f'=COUNTIF({col}{first_row}:{col}{last_row},"○")'
+                v = k
             elif lab == "推定競合":
                 v = round(comp_list[s], 1)
             else:
-                v = f"=IFERROR({col}{r-2}/({col}{r-2}+{col}{r-1}),0)"
+                v = k / (k + comp_list[s]) if k else 0
             cell = ws.cell(row=r, column=4 + s, value=v)
             cell.alignment, cell.border = center, box
             if lab == "確保の見込み":
                 cell.number_format = "0%"
         r += 1
-    ws.cell(row=r + 1, column=2, value="※「申込数」「確保の見込み」は○を書き換えると自動で計算し直します(新規IDの重みは含みません)。")
+    ws.cell(row=r + 1, column=2, value="※ 数字は作成時の案の値です。○の修正は、管理画面の「🗳 抽選申込」タブで行うと件数も自動で計算されます。")
     ws.column_dimensions["A"].width = 6
     ws.column_dimensions["B"].width = 24
     ws.column_dimensions["C"].width = 6
