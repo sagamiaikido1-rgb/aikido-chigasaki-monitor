@@ -89,25 +89,24 @@ def candidate_slots(year, month):
     return out
 
 
-def fallback_cap(year, month, closed=None):
-    """画面から上限が読めないときの目安:その月の土曜日(休館日を除く)の数。
-    2026年10月=5、11月=4、12月=4、2027年1月=4(1/2休館)と、実際の上限に合う。"""
-    d, n = date(year, month, 1), 0
+def month_cap(year, month, closed=None):
+    """1IDあたりの申込上限 = その月で一番多い曜日の日数(休館日は数えない)。
+    例: 2026年11月は日曜・月曜が5日 → 5 / 2027年1月は1〜3日が休館で金土日が4日 → 4。"""
+    counts = [0] * 7
+    d = date(year, month, 1)
     while d.month == month:
-        if d.weekday() == 5 and not (closed and d in closed):
-            n += 1
+        if not (closed and d in closed):
+            counts[d.weekday()] += 1
         d += timedelta(days=1)
-    return n
+    return max(counts)
 
 
-def cap_for(plan_ym, closed, page_cap, override=""):
-    """上限の決め方:入力欄の指定 > 抽選申込画面の表示 > 目安(土曜日の数)。"""
+def cap_for(plan_ym, closed, override=""):
+    """上限の決め方:入力欄の指定があればそれ、なければ month_cap。"""
     if str(override).strip():
         cap, how = int(override), "入力欄の指定"
-    elif page_cap:
-        cap, how = page_cap, "抽選申込画面の表示"
     else:
-        cap, how = fallback_cap(*plan_ym, closed), "目安(土曜日の数)"
+        cap, how = month_cap(*plan_ym, closed), "一番多い曜日の日数(休館日を除く)"
     print(f"[上限] 1IDあたり {cap}件({how})")
     return cap
 
@@ -452,31 +451,6 @@ def read_lottery_page(browser, uid, pw, year, month):
         ctx.close()
 
 
-_CAP_RES = [
-    re.compile(r"(?:上限|申込可能|申し込み可能|申込み可能|申込件数|申込回数|申込数)[^0-9０-９\n]{0,20}([0-9０-９]{1,2})\s*(?:件|回|コマ|枠)"),
-    re.compile(r"([0-9０-９]{1,2})\s*(?:件|回|コマ|枠)\s*(?:まで|以内)"),
-]
-
-
-def parse_cap(html):
-    """抽選申込画面の文章から、1IDあたりの申込上限(件数)を探す。見つからなければ None。"""
-    text = lc.cell_text(re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S))
-    text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
-    for rx in _CAP_RES:
-        m = rx.search(text)
-        if m:
-            n = int(m.group(1).translate(str.maketrans("０１２３４５６７８９", "0123456789")))
-            if 1 <= n <= 10:
-                return n
-    return None
-
-
-def cap_hints(html):
-    """上限の書き方を調べるための手がかり(件・回を含む短い文だけ。個人情報は含まない)。"""
-    text = lc.cell_text(re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S))
-    return sorted(set(m.group(0) for m in re.finditer(r"[^ 。]{0,25}[0-9０-９]+\s*[件回][^ 。]{0,15}", text)))[:15]
-
-
 def read_closed_days(browser, uid, pw, year, month):
     """休館日の集合。読めなければ None。"""
     html = read_lottery_page(browser, uid, pw, year, month)
@@ -548,14 +522,12 @@ def main():
             except Exception as e:
                 failed.append(i)
                 print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
-        closed, page_cap = None, None
+        closed = None
         for (i, uid, pw) in accounts:
             if i not in failed:
                 html = read_lottery_page(browser, uid, pw, *plan_ym)
                 if html is not None:
-                    closed, page_cap = parse_closed_days(html, plan_ym[0]), parse_cap(html)
-                    if page_cap is None:
-                        print("[上限] 画面から読み取れませんでした。手がかり:", cap_hints(html))
+                    closed = parse_closed_days(html, plan_ym[0])
                 break
         browser.close()
 
@@ -565,7 +537,7 @@ def main():
         print(f"[実績] {b}: {n}枠中 {w}枠確保 → 推定競合 {c:.1f}件")
 
     all_slots = candidate_slots(*plan_ym)
-    cap = cap_for(plan_ym, closed, page_cap, os.environ.get("PLAN_CAP", ""))
+    cap = cap_for(plan_ym, closed, os.environ.get("PLAN_CAP", ""))
     closed_slots = [sl for sl in all_slots if closed and sl[0] in closed]
     slots = [sl for sl in all_slots if sl not in closed_slots]
     if closed is None:
@@ -585,7 +557,7 @@ def main():
     print(f"確保できる日数の見込み: {total:.1f} / {len(slots)} 日")
 
     lines = [f"{plan_ym[0]}年{plan_ym[1]}月分の抽選申込案です(添付Excel)。", "",
-             f"・候補日 {len(slots)}日(日曜朝・水曜夜) / 使うID {len(ids)}個 / 1IDあたり上限 {cap}件",
+             f"・候補日 {len(slots)}日(日曜朝・水曜夜) / 使うID {len(ids)}個 / 1IDあたり上限 {cap}件(一番多い曜日の日数・休館日を除く)",
              f"・確保できる日数の見込み: {total:.1f} / {len(slots)} 日", ""]
     for b, (c, n, w) in comp.items():
         lines.append(f"・過去の{b}: {n}枠中 {w}枠確保(推定競合 {c:.1f}件)")

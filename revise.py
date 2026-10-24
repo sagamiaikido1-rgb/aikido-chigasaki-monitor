@@ -164,7 +164,7 @@ def main():
     others = {k: max(counts.get(k, 0) - len(assign[k]), 0) for k in cands}
     outside = {k: v for k, v in cur.items() if k not in assign}  # 候補外の申込(日曜夜など)はそのまま
 
-    cap = plan.cap_for((year, month), closed, plan.parse_cap(html), os.environ.get("PLAN_CAP", ""))
+    cap = plan.cap_for((year, month), closed, os.environ.get("PLAN_CAP", ""))
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
     before = expected(assign, others, weights)
     new_assign, moves = improve(assign, others, ids, cap, weights)
