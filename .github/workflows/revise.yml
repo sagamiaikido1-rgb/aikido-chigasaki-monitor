@@ -6,6 +6,7 @@ permissions:
 on:
   schedule:
     - cron: "41 10 1-15 * *"   # UTC10:41 = 日本時間19:41、毎月1〜15日
+    - cron: "41 1 15 * *"      # 15日だけ昼にも(UTC1:41 = 日本時間10:41)。締切前に判断の時間を残すため
   workflow_dispatch:
     inputs:
       month:

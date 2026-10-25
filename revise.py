@@ -110,6 +110,20 @@ def improve(assign, others, ids, cap, weights, min_gain=MIN_GAIN, max_moves=MAX_
     return assign, moves
 
 
+def should_notify(prev, moves_json, day, ym):
+    """メールを送るか。修正案が出た(または前回と変わった)とき、修正案が無くなったとき、
+    初日(1日)と締切前(14日・15日)の状況報告のときだけ送る。同じ修正案を毎日繰り返し送らない。"""
+    same_month = bool(prev) and (prev.get("year"), prev.get("month")) == ym
+    prev_moves = prev.get("moves", []) if same_month else []
+    if day in (1, 14, 15):
+        return True, "状況報告"
+    if moves_json and moves_json != prev_moves:
+        return True, "修正案あり"
+    if not moves_json and prev_moves:
+        return True, "修正不要になりました"
+    return False, ""
+
+
 def key_label(k):
     d = k[0]
     return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}) {k[1][:2]}-{k[2][:2]}時"
@@ -186,6 +200,7 @@ def main():
     lines.append("")
     if moves:
         lines.append(f"■ 修正案 {len(moves)}件(代表のご判断をお願いします)")
+        lines.append("  → 管理画面「🗳 抽選申込」で「修正案を表に反映する」→「この内容で申し込む」を押すと、取消・申込し直しを行います")
         for n, mv in enumerate(moves, 1):
             if mv["kind"] == "move":
                 lines.append(f"  {n}. {who(mv['id'])}: {key_label(mv['from'])} を取消 → {key_label(mv['to'])} に申込")
@@ -200,10 +215,15 @@ def main():
         lines.append("※ 休館日: " + "、".join(f"{d.month}/{d.day}" for d in sorted(closed)))
     if failed:
         lines.append("※ 読み取れなかったID(計算から除外): " + "、".join(who(i) for i in failed))
-    lines += ["", f"※ 締切は {month - 2 if month > 2 else month + 10}月15日 23:59 です。件数は毎日変わるので、最終判断は14日・15日の通知をご覧ください。"]
+    lines += ["", f"※ 締切は {month - 2 if month > 2 else month + 10}月15日 23:59 です。件数は毎日変わるので、14日・15日には状況のお知らせが届きます。"]
     body = "\n".join(lines)
 
     os.makedirs("plan", exist_ok=True)
+    try:
+        with open("plan/revise_latest.json", encoding="utf-8") as f:
+            prev = json.load(f)
+    except Exception:
+        prev = None
     data = {
         "year": year, "month": month, "checked_at": datetime.now(plan.JST).strftime("%Y-%m-%d %H:%M"),
         "expected_before": round(before, 2), "expected_after": round(after, 2),
@@ -213,12 +233,16 @@ def main():
                    "from": f"{mv['from'][0].isoformat()} {mv['from'][1]}-{mv['from'][2]}" if mv["from"] else None,
                    "to": f"{mv['to'][0].isoformat()} {mv['to'][1]}-{mv['to'][2]}"} for mv in moves],
     }
+
+    notify, why = should_notify(prev, data["moves"], today.day, (year, month))
+    data["notified"] = notify
     for name in (f"plan/revise_{today.isoformat()}.json", "plan/revise_latest.json"):
         with open(name, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-
-    if os.environ.get("SEND_MAIL", "1") == "1":
-        subject = f"【合気道】{month}月分 抽選 " + (f"修正案{len(moves)}件" if moves else "修正不要") + f"({today.month}/{today.day})"
+    if not notify:
+        print("修正案は前回と同じため、メールは送りません(管理画面には表示されます)")
+    elif os.environ.get("SEND_MAIL", "1") == "1":
+        subject = f"【合気道】{month}月分 抽選 " + (f"修正案{len(moves)}件" if moves else "修正不要") + f"({today.month}/{today.day}・{why})"
         lc.ca.send_mail(subject, body)
         print("メールを送信しました。")
 

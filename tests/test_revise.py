@@ -32,3 +32,11 @@ assert [m["kind"] for m in moves2] == ["add", "add"], moves2
 _, m3 = revise.improve({A: [1], B: [2], C: [3]}, {A: 0, B: 0, C: 0}, [1, 2, 3], 1, {})
 assert m3 == []
 print("revise ok")
+m = [{"kind": "move", "id": 1, "from": "a", "to": "b"}]
+assert revise.should_notify(None, m, 3, (2027, 1)) == (True, "修正案あり")
+assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, m, 4, (2027, 1)) == (False, "")
+assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, [], 5, (2027, 1)) == (True, "修正不要になりました")
+assert revise.should_notify({"year": 2027, "month": 1, "moves": []}, [], 6, (2027, 1)) == (False, "")
+assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, m, 14, (2027, 1))[0]
+assert revise.should_notify({"year": 2026, "month": 12, "moves": m}, m, 3, (2027, 1)) == (True, "修正案あり")
+print("notify ok")
