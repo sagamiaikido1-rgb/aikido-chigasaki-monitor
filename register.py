@@ -128,8 +128,14 @@ def target_month(today: date):
     return f"{y}-{m:02d}"
 
 
-def needs_run(doc):
-    return bool(doc) and doc.get("status") == "承認済み" and \
+def needs_run(doc, reprocess=False):
+    """処理するか。reprocess=True(手動実行の「もう一度処理する」)なら、処理済みの確定ももう一度処理する。
+    ただし登録中(別の実行が動いている)のときは処理しない。"""
+    if not doc or not doc.get("applications"):
+        return False
+    if reprocess:
+        return doc.get("status") != "登録中"
+    return doc.get("status") == "承認済み" and \
         int(doc.get("revision") or 0) > int(doc.get("processed_revision") or 0)
 
 
@@ -197,16 +203,19 @@ def main():
         print(f"::error::[エラー] 管理者ログインに失敗しました({err_text(e)})。Secrets の FIREBASE_EMAIL / FIREBASE_PASSWORD を確認してください")
         sys.exit(1)
     doc = fs_get(ym, token)
+    reprocess = os.environ.get("REPROCESS", "0") == "1"
+    if reprocess:
+        print("[手動] もう一度処理する が指定されました")
 
     if mode == "check":
-        run = needs_run(doc)
+        run = needs_run(doc, reprocess)
         print(f"{ym}: " + ("代表の確定あり → 登録処理を行います" if run else "処理は不要です"))
         if out:
             with open(out, "a") as f:
                 f.write(f"run={'1' if run else '0'}\nmonth={ym}\n")
         return
 
-    if not needs_run(doc):
+    if not needs_run(doc, reprocess):
         print("処理は不要です")
         return
     import lottery_check as lc

@@ -8,6 +8,12 @@ on:
       month:
         description: 対象月(例 2027-01)。空欄なら申込期間中の月
         default: ""
+      reprocess:
+        description: 1=処理済みの確定ももう一度処理する(代表の押し直し不要)
+        default: "0"
+      mode:
+        description: dry=確認のみ(申込しない) live=本番(自動申込の完成後に使う)
+        default: "dry"
 
 concurrency:
   group: register
@@ -28,6 +34,7 @@ jobs:
           FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ github.event.inputs.month }}
+          REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
         run: python register.py check
       - if: steps.check.outputs.run == '1'
         run: pip install -r requirements.txt && playwright install --with-deps chromium
@@ -43,5 +50,6 @@ jobs:
           FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ steps.check.outputs.month }}
-          REGISTER_MODE: dry
+          REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
+          REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}
         run: python register.py run
