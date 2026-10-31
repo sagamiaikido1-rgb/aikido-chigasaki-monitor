@@ -248,7 +248,12 @@ def apply_for_account(browser, uid, pw, year, month, adds, cancels, log=print, s
         return n_add, n_cancel
     except Exception:
         log(f"  [診断] 止まった画面: {_heading(page)}")
-        lc.show_labels(page)
+        try:
+            names = page.eval_on_selector_all("a, button, input[type=button], input[type=submit]",
+                "els => els.filter(e => e.offsetParent !== null).map(e => (e.innerText || e.value || '').trim()).filter(t => t && t.length < 20)")
+            log("  [診断] 画面の項目: " + " / ".join(sorted(set(names)))[:400])
+        except Exception:
+            pass
         raise
     finally:
         ctx.close()

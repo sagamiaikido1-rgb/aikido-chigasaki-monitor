@@ -159,10 +159,12 @@ def slot_text(s):
 
 # ---------------------------------------------------------------- 実行
 
-def apply_changes(browser, uid, pw, year, month, adds, cancels, stop_before=False):
-    """1つのIDで、取消 → 追加 を行う(apply.py)。→ (追加した数, 取消した数)"""
+def apply_changes(browser, uid, pw, year, month, adds, cancels, stop_before=False, notice=False):
+    """1つのIDで、取消 → 追加 を行う(apply.py)。→ (追加した数, 取消した数)
+    notice=True(テスト)のときは、経過を Actions の注記にも出す(実行結果の画面ですぐ見られるように)。"""
     import apply
-    return apply.apply_for_account(browser, uid, pw, year, month, adds, cancels, print, stop_before)
+    log = (lambda t: print("::notice::" + t.strip())) if notice else print
+    return apply.apply_for_account(browser, uid, pw, year, month, adds, cancels, log, stop_before)
 
 
 def names_test():
@@ -268,9 +270,9 @@ def main():
                 if i in failed or (i not in adds and i not in cancels):
                     continue
                 time.sleep(3)
-                print(f"[ID{i}] 取消 {len(cancels.get(i, []))}件 → 追加 {len(adds.get(i, []))}件")
+                print(("::notice::" if testing else "") + f"[ID{i}] 取消 {len(cancels.get(i, []))}件 → 追加 {len(adds.get(i, []))}件")
                 try:
-                    na, nc = apply_changes(browser, uid, pw, y, m, adds.get(i, []), cancels.get(i, []), stop_before)
+                    na, nc = apply_changes(browser, uid, pw, y, m, adds.get(i, []), cancels.get(i, []), stop_before, testing)
                     done_ok += 1
                 except Exception as e:
                     done_ng += 1
@@ -324,7 +326,7 @@ def main():
     if failed:
         lines_admin.append("読み取れなかったID: " + "、".join(map(str, failed)))
         lines_mail.append("※ 読み取れなかったID: " + "、".join(lc.who_label(i, names.get(i, "")) for i in failed))
-    print(f"追加 {n_add}件 / 取消 {n_cancel}件 / 読み取れなかったID {len(failed)}個")
+    print(("::notice::" if testing else "") + f"追加 {n_add}件 / 取消 {n_cancel}件 / 読み取れなかったID {len(failed)}個")
 
     if testing:
         print("[テスト] 終了しました(管理画面の状態は変えていません)")
