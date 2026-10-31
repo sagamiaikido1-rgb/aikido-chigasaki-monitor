@@ -44,7 +44,7 @@ jobs:
         run: python register.py check
       - if: steps.check.outputs.run == '1'
         run: pip install -r requirements.txt && playwright install --with-deps chromium
-      - name: 登録(いまは確認のみ)
+      - name: 登録(代表の確定を受けて申込・取消)
         if: steps.check.outputs.run == '1'
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
@@ -57,7 +57,7 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ steps.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
-          REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}
+          REGISTER_MODE: ${{ github.event.inputs.mode || 'live' }}   # 30分おきの自動実行は本番(代表の確定で申し込む)
           TEST_ID: ${{ github.event.inputs.test_id }}
           TEST_LIMIT: ${{ github.event.inputs.test_limit }}
         run: python register.py run
