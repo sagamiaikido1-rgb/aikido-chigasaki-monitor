@@ -159,9 +159,10 @@ def slot_text(s):
 
 # ---------------------------------------------------------------- 実行
 
-def apply_changes(browser, uid, pw, adds, cancels):
-    """1つのIDで、取消 → 追加 を行う。11/1に申込トレイ〜確定の画面を確認してから実装する。"""
-    raise NotImplementedError("自動登録は準備中です")
+def apply_changes(browser, uid, pw, year, month, adds, cancels, stop_before=False):
+    """1つのIDで、取消 → 追加 を行う(apply.py)。→ (追加した数, 取消した数)"""
+    import apply
+    return apply.apply_for_account(browser, uid, pw, year, month, adds, cancels, print, stop_before)
 
 
 def names_test():
@@ -222,9 +223,17 @@ def main():
     import plan
     from playwright.sync_api import sync_playwright
 
-    live = os.environ.get("REGISTER_MODE", "dry") == "live"
+    mode_ = os.environ.get("REGISTER_MODE", "dry")
+    live = mode_ == "live"
+    stop_before = mode_ == "stop"          # テスト①: 「同意して申し込む」の手前で止める
+    test_id = int(os.environ.get("TEST_ID", "") or 0)        # テスト: このID番号だけ
+    test_limit = int(os.environ.get("TEST_LIMIT", "") or 0)  # テスト: 追加はこの件数まで
+    testing = stop_before or bool(test_id)
+    if testing:
+        print(f"[テスト] mode={mode_} ID番号={test_id or '全部'} 追加の上限={test_limit or 'なし'}"
+              "(管理画面の状態は変えず、メールも送りません)")
     revision = int(doc.get("revision") or 0)
-    if token:
+    if token and not testing:
         fs_update(ym, {"status": "登録中"}, token)
     y, m = (int(x) for x in ym.split("-"))
     desired = {int(k): set(v) for k, v in (doc.get("applications") or {}).items()}
@@ -233,6 +242,8 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         for (i, uid, pw) in accounts:
+            if test_id and i != test_id:
+                continue
             if i > 1:
                 time.sleep(3)
             try:
@@ -245,23 +256,56 @@ def main():
                 failed.append(i)
                 print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
         adds, cancels = diff(desired, current)
-        done_ok, done_ng = 0, 0
-        if live:
+        if test_id:
+            adds = {k: v for k, v in adds.items() if k == test_id}
+            cancels = {k: v for k, v in cancels.items() if k == test_id}
+            desired = {k: v for k, v in desired.items() if k == test_id}
+        if test_limit:
+            adds = {k: v[:test_limit] for k, v in adds.items()}
+        done_ok, done_ng, apply_failed = 0, 0, []
+        if live or stop_before:
             for (i, uid, pw) in accounts:
                 if i in failed or (i not in adds and i not in cancels):
                     continue
+                time.sleep(3)
+                print(f"[ID{i}] 取消 {len(cancels.get(i, []))}件 → 追加 {len(adds.get(i, []))}件")
                 try:
-                    apply_changes(browser, uid, pw, adds.get(i, []), cancels.get(i, []))
+                    na, nc = apply_changes(browser, uid, pw, y, m, adds.get(i, []), cancels.get(i, []), stop_before)
                     done_ok += 1
                 except Exception as e:
                     done_ng += 1
-                    print(f"[エラー] ID{i} の登録に失敗しました({type(e).__name__})")
+                    apply_failed.append(i)
+                    print(f"::error::[エラー] ID{i} の登録に失敗しました: {str(e)[:150]}")
+                    if live and cancels.get(i):
+                        try:
+                            lc.ca.send_mail(f"【合気道】{m}月分 抽選申込 至急: ID番号{i}の登録に失敗",
+                                            f"ID番号{i}で取消のあとの申込に失敗した可能性があります。\n"
+                                            f"抽選申込一覧を確認し、必要なら手で申し込み直してください。\n\n{str(e)[:300]}")
+                        except Exception:
+                            pass
+            if live:
+                # 申し込んだ結果を読み直して確かめる
+                for (i, uid, pw) in accounts:
+                    if i not in adds and i not in cancels:
+                        continue
+                    try:
+                        now = {f"{y}-{m:02d}-{r['day']:02d} {r['start']}-{r['end']}"
+                               for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
+                               if (r["year"], r["month"]) == (y, m) and "柔道場" in r["text"] and "柔剣道場" not in r["text"]
+                               and any(w in r["status"] for w in ("抽選待ち", "抽選中", "受付"))}
+                        a2, c2 = diff({i: desired.get(i, set())}, {i: now})
+                        if a2 or c2:
+                            if i not in apply_failed:
+                                apply_failed.append(i)
+                            print(f"::warning::[確認] ID{i} は確定した表とまだ違います(足りない {len(a2.get(i, []))}件・余分 {len(c2.get(i, []))}件)")
+                    except Exception as e:
+                        print(f"[確認] ID{i} を読み直せませんでした({type(e).__name__})")
         browser.close()
 
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
     n_add = sum(len(v) for v in adds.values())
     n_cancel = sum(len(v) for v in cancels.values())
-    head = "登録しました" if live else "登録予定を確認しました(自動登録は準備中のため、まだ申込はしていません)"
+    head = "登録しました" if live else "登録予定を確認しました(まだ申込はしていません)"
     lines_admin = [f"追加 {n_add}件 / 取消 {n_cancel}件"]  # 管理画面用(ID番号のみ)
     lines_mail = [f"{y}年{m}月分 抽選申込: {head}", "", f"■ 追加 {n_add}件 / 取消 {n_cancel}件", ""]
     for i in sorted(set(adds) | set(cancels)):
@@ -272,13 +316,21 @@ def main():
         lines_mail.append(f"  {lc.who_label(i, names.get(i, ''))}  {part}")
     if not adds and not cancels:
         lines_mail.append("  今の申込は確定した案と同じです。変更はありません。")
+    if live and apply_failed:
+        lines_admin.append("登録できなかった・表と合わないID: " + "、".join(map(str, sorted(apply_failed))))
+        lines_mail.append("")
+        lines_mail.append("※ 登録できなかった・表と合わないID: " + "、".join(lc.who_label(i, names.get(i, "")) for i in sorted(apply_failed)))
+        lines_mail.append("  抽選申込一覧を確認し、必要なら手で申し込んでください(締切 15日 23:59)。")
     if failed:
         lines_admin.append("読み取れなかったID: " + "、".join(map(str, failed)))
         lines_mail.append("※ 読み取れなかったID: " + "、".join(lc.who_label(i, names.get(i, "")) for i in failed))
     print(f"追加 {n_add}件 / 取消 {n_cancel}件 / 読み取れなかったID {len(failed)}個")
 
+    if testing:
+        print("[テスト] 終了しました(管理画面の状態は変えていません)")
+        return
     if token:
-        status = ("登録済み" if not done_ng and not failed else "一部失敗") if live else "確認のみ"
+        status = ("登録済み" if not apply_failed and not failed else "一部失敗") if live else "確認のみ"
         fs_update(ym, {"status": status, "processed_revision": revision,
                        "result": {"checked_at": datetime.now(ZoneInfo('Asia/Tokyo')).strftime("%Y-%m-%d %H:%M"),
                                   "add": n_add, "cancel": n_cancel, "failed_ids": failed,

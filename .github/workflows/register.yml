@@ -12,8 +12,14 @@ on:
         description: 1=処理済みの確定ももう一度処理する(代表の押し直し不要)
         default: "0"
       mode:
-        description: dry=確認のみ(申込しない) live=本番(自動申込の完成後に使う)
+        description: dry=確認のみ / stop=テスト(「同意して申し込む」の手前で止める) / live=本番
         default: "dry"
+      test_id:
+        description: テスト用。このID番号だけ処理する(空欄なら全ID)
+        default: ""
+      test_limit:
+        description: テスト用。追加する件数の上限(空欄なら制限なし)
+        default: ""
 
 concurrency:
   group: register
@@ -52,4 +58,6 @@ jobs:
           REGISTER_MONTH: ${{ steps.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
           REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}
+          TEST_ID: ${{ github.event.inputs.test_id }}
+          TEST_LIMIT: ${{ github.event.inputs.test_limit }}
         run: python register.py run
