@@ -84,8 +84,19 @@ def _date_pattern(y, mo, d):
 # ---------------------------------------------------------------- 申込トレイ
 
 def clear_tray(page, log):
-    """申込トレイに残っている(まだ申し込んでいない)ものを取り除く。前回のテストの残りなど。"""
-    _click(page, "申込トレイ")
+    """申込トレイに残っている(まだ申し込んでいない)ものを取り除く。前回のテストの残りなど。
+    トップページには「申込トレイ」が出ないので、抽選施設一覧を開いてからたどる。"""
+    try:
+        lc.go_menu_item(page, "申込トレイ")
+    except Exception:
+        try:
+            lc.go_menu_item(page, "抽選施設一覧")
+            page.wait_for_timeout(1200)
+            lc.go_menu_item(page, "申込トレイ")
+        except Exception:
+            log("  [注意] 申込トレイを開けませんでした(空にする処理は飛ばします)")
+            return
+    page.wait_for_timeout(1200)
     for _ in range(30):
         if "利用施設" not in _text(page):
             return
