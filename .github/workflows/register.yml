@@ -57,7 +57,7 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ steps.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
-          REGISTER_MODE: ${{ github.event.inputs.mode || 'live' }}   # 30分おきの自動実行は本番(代表の確定で申し込む)
+          REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}   # 11/1の不具合のため一時的に確認のみに戻す
           TEST_ID: ${{ github.event.inputs.test_id }}
           TEST_LIMIT: ${{ github.event.inputs.test_limit }}
         run: python register.py run
