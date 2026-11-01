@@ -61,9 +61,6 @@ H = ("<table><tr><th>施設</th><th>8</th><th>9</th></tr>"
      "<tr><td>1/12 (火)</td><td colspan='13'>休館</td></tr></table>")
 assert plan.parse_closed_days(H, 2027) == {date(2027, 1, 1), date(2027, 1, 3), date(2027, 1, 12)}
 print("closed ok")
-assert plan.month_cap(2026, 10) == 5 and plan.month_cap(2026, 11) == 5
-assert plan.month_cap(2026, 12, {date(2026,12,29), date(2026,12,30), date(2026,12,31)}) == 4
-assert plan.month_cap(2027, 1, {date(2027,1,1), date(2027,1,2), date(2027,1,3), date(2027,1,12)}) == 4
-assert plan.month_cap(2027, 1) == 5
+assert plan.month_cap(2026, 11) == 4 and plan.month_cap(2027, 1) == 4
 assert plan.cap_for((2027, 1), None, "2") == 2
 print("cap ok")

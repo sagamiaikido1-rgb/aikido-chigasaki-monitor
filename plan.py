@@ -89,16 +89,12 @@ def candidate_slots(year, month):
     return out
 
 
+CAP_PER_BUILDING = 4   # 1IDあたり、総合体育館(柔道場・柔剣道場などを合わせて)で申し込める上限。週の数に関係なく4件
+
+
 def month_cap(year, month, closed=None):
-    """1IDあたりの申込上限 = その月で一番多い曜日の日数(休館日は数えない)。
-    例: 2026年11月は日曜・月曜が5日 → 5 / 2027年1月は1〜3日が休館で金土日が4日 → 4。"""
-    counts = [0] * 7
-    d = date(year, month, 1)
-    while d.month == month:
-        if not (closed and d in closed):
-            counts[d.weekday()] += 1
-        d += timedelta(days=1)
-    return max(counts)
+    """1IDあたりの申込上限。施設(総合体育館)ごとに4件で、月の週の数や休館日には左右されない。"""
+    return CAP_PER_BUILDING
 
 
 def cap_for(plan_ym, closed, override=""):
@@ -106,7 +102,7 @@ def cap_for(plan_ym, closed, override=""):
     if str(override).strip():
         cap, how = int(override), "入力欄の指定"
     else:
-        cap, how = month_cap(*plan_ym, closed), "一番多い曜日の日数(休館日を除く)"
+        cap, how = month_cap(*plan_ym, closed), "総合体育館で1IDあたり4件"
     print(f"[上限] 1IDあたり {cap}件({how})")
     return cap
 
@@ -577,7 +573,7 @@ def main():
     print(f"確保できる日数の見込み: {total:.1f} / {len(slots)} 日")
 
     lines = [f"{plan_ym[0]}年{plan_ym[1]}月分の抽選申込案です(添付Excel)。", "",
-             f"・候補日 {len(slots)}日(日曜朝・水曜夜) / 使うID {len(ids)}個 / 1IDあたり上限 {cap}件(一番多い曜日の日数・休館日を除く)",
+             f"・候補日 {len(slots)}日(日曜朝・水曜夜) / 使うID {len(ids)}個 / 1IDあたり上限 {cap}件(総合体育館で4件)",
              f"・確保できる日数の見込み: {total:.1f} / {len(slots)} 日", ""]
     for b, (c, n, w) in comp.items():
         lines.append(f"・過去の{b}: {n}枠中 {w}枠確保(推定競合 {c:.1f}件)")
