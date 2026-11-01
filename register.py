@@ -188,11 +188,64 @@ def names_test():
         print(f"::error::[診断] 書き込み 失敗 ({err_text(e)})")
 
 
+def status_report(ym):
+    """全IDの今の抽選申込(抽選待ち)を、柔道場・柔剣道場の別に一覧にする。
+    Actions の注記には ID番号だけ、メールには団体名も書く。"""
+    import lottery_check as lc
+    import plan
+    from playwright.sync_api import sync_playwright
+    y, m = (int(x) for x in ym.split("-"))
+    accounts = lc.load_accounts()
+    rows_by = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        for (i, uid, pw) in accounts:
+            if i > 1:
+                time.sleep(3)
+            try:
+                rows_by[i] = [r for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
+                              if (r["year"], r["month"]) == (y, m) and "総合体育館" in r["text"]]
+            except Exception as e:
+                rows_by[i] = None
+        browser.close()
+    names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
+
+    def lab(r):
+        d = date(r["year"], r["month"], r["day"])
+        fac = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else "他")
+        return f"{fac}{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}){r['start'][:2]}時"
+
+    note, mail = [], [f"{y}年{m}月分 抽選申込の状況(全ID・抽選待ちのみ)", "柔道＝柔道場 / 柔剣＝柔剣道場", ""]
+    tot = {"柔道": 0, "柔剣": 0}
+    for (i, _u, _p) in accounts:
+        rs = rows_by.get(i)
+        if rs is None:
+            line = "読み取れませんでした"
+        else:
+            act = sorted((r for r in rs if "抽選待ち" in r["status"]), key=lambda r: (r["day"], r["start"]))
+            for r in act:
+                tot["柔剣" if "柔剣道場" in r["text"] else "柔道"] += 1
+            other = [r for r in rs if "抽選待ち" not in r["status"]]
+            line = f"{len(act)}件 " + "、".join(lab(r) for r in act)
+            if other:
+                line += f"  (取消など {len(other)}件: " + "、".join(lab(r) + r["status"] for r in other) + ")"
+        note.append(f"ID{i}: {line}")
+        mail.append(f"{lc.who_label(i, names.get(i, ''))}  {line}")
+    head = f"合計 柔道場 {tot['柔道']}件 / 柔剣道場 {tot['柔剣']}件"
+    print("::notice::" + "%0A".join([head] + note))
+    mail[2:2] = [head, ""]
+    if os.environ.get("SEND_MAIL", "1") == "1":
+        lc.ca.send_mail(f"【合気道】{m}月分 抽選申込の状況(全ID)", "\n".join(mail))
+
+
 def main():
     from zoneinfo import ZoneInfo
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
     if mode == "names-test":
         names_test()
+        return
+    if mode == "status":
+        status_report(os.environ.get("REGISTER_MONTH", "").strip() or "2027-01")
         return
     today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
     ym = os.environ.get("REGISTER_MONTH", "").strip() or target_month(today)

@@ -1,0 +1,33 @@
+name: 合気道 抽選申込の状況(全ID)
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 対象月(例 2027-01)
+        default: "2027-01"
+      send_mail:
+        description: 1=メールでも送る
+        default: "1"
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - name: 全IDの抽選申込一覧を読む(読み取りのみ)
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          REGISTER_MONTH: ${{ github.event.inputs.month }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python register.py status
