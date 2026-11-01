@@ -204,7 +204,7 @@ def status_report(ym):
                 time.sleep(3)
             try:
                 rows_by[i] = [r for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
-                              if (r["year"], r["month"]) == (y, m) and "総合体育館" in r["text"]]
+                              if (r["year"], r["month"]) == (y, m)]
             except Exception as e:
                 rows_by[i] = None
         browser.close()
@@ -212,7 +212,8 @@ def status_report(ym):
 
     def lab(r):
         d = date(r["year"], r["month"], r["day"])
-        fac = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else "他")
+        fac = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else
+                                                   "他[" + (r.get("facility") or r["text"])[:30] + "]")
         return f"{fac}{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}){r['start'][:2]}時"
 
     note, mail = [], [f"{y}年{m}月分 抽選申込の状況(全ID・抽選待ちのみ)", "柔道＝柔道場 / 柔剣＝柔剣道場", ""]
@@ -224,14 +225,15 @@ def status_report(ym):
         else:
             act = sorted((r for r in rs if "抽選待ち" in r["status"]), key=lambda r: (r["day"], r["start"]))
             for r in act:
-                tot["柔剣" if "柔剣道場" in r["text"] else "柔道"] += 1
+                k = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else "他")
+                tot[k] = tot.get(k, 0) + 1
             other = [r for r in rs if "抽選待ち" not in r["status"]]
             line = f"{len(act)}件 " + "、".join(lab(r) for r in act)
             if other:
                 line += f"  (取消など {len(other)}件: " + "、".join(lab(r) + r["status"] for r in other) + ")"
         note.append(f"ID{i}: {line}")
         mail.append(f"{lc.who_label(i, names.get(i, ''))}  {line}")
-    head = f"合計 柔道場 {tot['柔道']}件 / 柔剣道場 {tot['柔剣']}件"
+    head = f"合計 柔道場 {tot['柔道']}件 / 柔剣道場 {tot['柔剣']}件" + (f" / その他 {tot['他']}件" if tot.get("他") else "")
     print("::notice::" + "%0A".join([head] + note))
     mail[2:2] = [head, ""]
     if os.environ.get("SEND_MAIL", "1") == "1":
