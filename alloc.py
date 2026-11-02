@@ -184,3 +184,21 @@ def to_applications(assign, ids):
         for i in lst:
             out[str(i)].append(key)
     return {k: sorted(v) for k, v in out.items()}
+
+
+MIN_PER_SLOT = 8        # IDの残り件数が足りず目標に届かないときは、1枠の件数をここまで下げる
+
+
+def make_plan(year, month, avail, ids, existing=None, sun_kendo=SUN_KENDO,
+              per_slot=PER_SLOT, min_per_slot=MIN_PER_SLOT, cap=CAP):
+    """枠を作って割り振る。足りない枠が出たら、1枠の件数を 9 → 8 と下げて作り直す。
+    日曜夜(1件)は下げない。日曜朝は柔剣道場の件数を保ち、柔道場の側を減らす。
+    → dict(slots, skipped, add, remain, short, per_slot)"""
+    n = per_slot
+    while True:
+        slots, skipped = build_slots(year, month, avail, sun_kendo=min(sun_kendo, n), per_slot=n)
+        add, remain, short = allocate(slots, ids, cap=cap, existing=existing)
+        if not short or n <= min_per_slot:
+            return {"slots": slots, "skipped": skipped, "add": add, "remain": remain,
+                    "short": short, "per_slot": n}
+        n -= 1

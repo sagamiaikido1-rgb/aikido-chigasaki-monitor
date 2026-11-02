@@ -65,3 +65,18 @@ def test_diff_keeps_existing_and_fills_to_target():
     for key, lst in add.items():           # 今ある申込と同じ日に同じIDを入れない
         for i in lst:
             assert not any(i in v and k[:10] == key[:10] for k, v in ex.items())
+
+
+def test_reduce_to_8_when_short():
+    # 2027年3月は水曜5回・日曜4回の9枠 → 9件ずつだと81件で72件を超える
+    y, av = 2027, {}
+    for dd in range(1, 32):
+        d = date(y, 3, dd)
+        if d.weekday() == 2:
+            av[(d, "夜", "柔道")] = "○"
+        if d.weekday() == 6:
+            av[(d, "朝", "柔道")] = av[(d, "朝", "柔剣")] = av[(d, "夜", "柔道")] = "○"
+    r = alloc.make_plan(y, 3, av, list(range(1, 19)))
+    assert r["per_slot"] == 8 and not r["short"]
+    assert sum(len(v) for v in r["add"].values()) == 72
+    assert len(r["add"]["2027-03-07 0900-1200 柔剣"]) == 5 and len(r["add"]["2027-03-07 0900-1200"]) == 3
