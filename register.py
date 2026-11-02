@@ -210,13 +210,20 @@ def status_report(ym):
         browser.close()
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
 
+    def kind(r):
+        """総合体育館の柔剣道場・柔道場だけを数える。市体育館など別の建物は「他」(要確認)。"""
+        t = r["text"]
+        if "総合体育館" not in t:
+            return "他"
+        return "柔剣" if "柔剣道場" in t else ("柔道" if "柔道場" in t else "他")
+
     def lab(r):
         d = date(r["year"], r["month"], r["day"])
-        fac = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else
-                                                   "他[" + (r.get("facility") or r["text"])[:30] + "]")
+        k = kind(r)
+        fac = k if k != "他" else "★他の施設[" + " ".join((r.get("facility") or r["text"]).split())[:30] + "]"
         return f"{fac}{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}){r['start'][:2]}時"
 
-    note, mail = [], [f"{y}年{m}月分 抽選申込の状況(全ID・抽選待ちのみ)", "柔道＝柔道場 / 柔剣＝柔剣道場", ""]
+    note, mail = [], [f"{y}年{m}月分 抽選申込の状況(全ID・抽選待ちのみ)", "柔道＝総合体育館 柔道場 / 柔剣＝総合体育館 柔剣道場 / ★＝総合体育館以外", ""]
     tot = {"柔道": 0, "柔剣": 0}
     for (i, _u, _p) in accounts:
         rs = rows_by.get(i)
@@ -225,7 +232,7 @@ def status_report(ym):
         else:
             act = sorted((r for r in rs if "抽選待ち" in r["status"]), key=lambda r: (r["day"], r["start"]))
             for r in act:
-                k = "柔剣" if "柔剣道場" in r["text"] else ("柔道" if "柔道場" in r["text"] else "他")
+                k = kind(r)
                 tot[k] = tot.get(k, 0) + 1
             other = [r for r in rs if "抽選待ち" not in r["status"]]
             line = f"{len(act)}件 " + "、".join(lab(r) for r in act)
@@ -233,7 +240,8 @@ def status_report(ym):
                 line += f"  (取消など {len(other)}件: " + "、".join(lab(r) + r["status"] for r in other) + ")"
         note.append(f"ID{i}: {line}")
         mail.append(f"{lc.who_label(i, names.get(i, ''))}  {line}")
-    head = f"合計 柔道場 {tot['柔道']}件 / 柔剣道場 {tot['柔剣']}件" + (f" / その他 {tot['他']}件" if tot.get("他") else "")
+    head = (f"合計 総合体育館 柔道場 {tot['柔道']}件 / 柔剣道場 {tot['柔剣']}件"
+            + (f" / ★他の施設 {tot['他']}件(総合体育館以外。取り消しが必要か確認してください)" if tot.get("他") else ""))
     print("::notice::" + "%0A".join([head] + note))
     mail[2:2] = [head, ""]
     if os.environ.get("SEND_MAIL", "1") == "1":
