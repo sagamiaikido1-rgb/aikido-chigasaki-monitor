@@ -210,6 +210,10 @@ def main():
         if not any(x["g"] == g for x in groups):
             groups.append({"g": g, "kind": s[2]})
     others = others_by_group(groups, counts, current)
+    for x in groups:   # 画面の生の数(他団体の数え方を確かめるため)
+        g = x["g"]
+        print(f"[生の数] {g} 柔道場 抽選({counts.get(g, '-')}) 連盟{len(current.get(g, []))}"
+              + (f" / 柔剣道場 抽選({counts.get(g + ' 柔剣', '-')}) 連盟{len(current.get(g + ' 柔剣', []))}" if x["kind"] == "日曜朝" else ""))
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
     res = alloc.review_plan(groups, current, others, ids)
 
