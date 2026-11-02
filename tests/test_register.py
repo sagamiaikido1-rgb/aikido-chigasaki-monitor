@@ -39,3 +39,7 @@ add, cancel = rg.planned_changes({"applications": {"11": ["2027-01-13 1800-2100"
 assert add == {11: ["2027-01-27 1800-2100"]} and cancel == {}
 assert rg.slot_text("2027-01-17 0900-1200 柔剣") == "1/17(日)09時・柔剣道場"
 print("actions ok")
+# 新しい形で actions が空なら、前の applications があっても何もしない
+add, cancel = rg.planned_changes({"actions": {}, "applications": {"11": ["2027-01-27 1800-2100"]}}, cur)
+assert add == {} and cancel == {}
+print("empty actions ok")
