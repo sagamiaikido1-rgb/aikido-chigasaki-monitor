@@ -80,3 +80,27 @@ def test_reduce_to_8_when_short():
     assert r["per_slot"] == 8 and not r["short"]
     assert sum(len(v) for v in r["add"].values()) == 72
     assert len(r["add"]["2027-03-07 0900-1200 柔剣"]) == 5 and len(r["add"]["2027-03-07 0900-1200"]) == 3
+
+
+def test_review_rates_and_actions_respect_rules():
+    W = lambda d: f"2027-01-{d:02d} 1800-2100"  # noqa: E731
+    M = lambda d: f"2027-01-{d:02d} 0900-1200"  # noqa: E731
+    cur = {W(6): list(range(1, 10)), W(13): list(range(10, 19)),
+           M(17): [14, 15, 16, 17], M(17) + " 柔剣": [1, 2, 3, 4, 5]}
+    groups = [{"g": W(6), "kind": "水曜夜"}, {"g": W(13), "kind": "水曜夜"}, {"g": M(17), "kind": "日曜朝"}]
+    r = alloc.review(groups, cur, {M(17): 3}, list(range(1, 19)))
+    row = {x["g"]: x for x in r["rows"]}
+    assert row[M(17)]["total"] == 12 and abs(row[M(17)]["rate"] - 0.75) < 1e-9
+    assert row[W(6)]["rate"] == 1.0
+    assert r["actions"] and r["after"] > r["before"]
+    # 案を全部実行しても、1IDは4件まで・同じ日に1件まで・各枠8件以上
+    after = {k: list(v) for k, v in cur.items()}
+    for a in r["actions"]:
+        if a["from"]:
+            after[a["from"]].remove(a["id"])
+        after.setdefault(a["to"], []).append(a["id"])
+    for i in range(1, 19):
+        mine = [k for k, v in after.items() if i in v]
+        assert len(mine) <= 4 and len({k[:10] for k in mine}) == len(mine)
+    for g in (W(6), W(13), M(17)):
+        assert sum(len(v) for k, v in after.items() if k[:20] == g) >= 8

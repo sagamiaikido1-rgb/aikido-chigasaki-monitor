@@ -14,6 +14,7 @@
 柔道場は従来どおり部屋名を付けないので、今の登録処理・管理画面とそのまま互換。
 """
 
+from collections import defaultdict
 from datetime import date, timedelta
 
 PER_SLOT = 9            # 1枠あたりの当方の件数
@@ -202,3 +203,93 @@ def make_plan(year, month, avail, ids, existing=None, sun_kendo=SUN_KENDO,
             return {"slots": slots, "skipped": skipped, "add": add, "remain": remain,
                     "short": short, "per_slot": n}
         n -= 1
+
+
+# ---------------------------------------------------------------- 申込期間中(1〜15日)の見直し
+# 稽古枠(日付＋時間帯)ごとに、柔道場と柔剣道場を合わせて
+#   当選確率 = 連盟の申込数 ÷ 全体の申込数(連盟＋他団体)
+# を出し、枠ごとの差を見せる。そこから「追加」「取消→別の枠に申込」の案を作る。
+# 実行するか(追加・取消・保持)は代表代行が決める。ここでは案を作るだけ。
+
+REVIEW_MIN_GAIN = 0.01   # 当選確率の合計が 1% 以上上がる手だけを案にする
+REVIEW_MAX = 20          # 案の件数の上限
+KEEP_FLOOR = 8           # 取消の案を出しても、1枠に残す連盟の申込数(日曜夜は1)
+
+
+def group_of(key):
+    """'2027-01-17 0900-1200 柔剣' → '2027-01-17 0900-1200'(稽古枠)"""
+    return key[:20]
+
+
+def win_rate(ours, others):
+    return ours / (ours + others) if ours > 0 else 0.0
+
+
+def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_actions=REVIEW_MAX,
+           keep_floor=KEEP_FLOOR, sunday_room="柔剣"):
+    """groups:  [{"g": 稽古枠, "kind": "日曜朝"/"水曜夜"/"日曜夜"}]
+    current: 今の連盟の申込 {枠(部屋付き): [ID番号]}
+    others:  他団体の申込数 {稽古枠: 件数}(柔道場＋柔剣道場の合計)
+    → {"rows": 枠ごとの表, "actions": 案, "before": 合計, "after": 合計}"""
+    assign = {k: list(v) for k, v in current.items()}
+    kinds = {x["g"]: x["kind"] for x in groups}
+    floor = {g: (1 if k == "日曜夜" else keep_floor) for g, k in kinds.items()}
+
+    def ours(g):
+        return sum(len(v) for k, v in assign.items() if group_of(k) == g)
+
+    def p(g, d=0):
+        return win_rate(ours(g) + d, others.get(g, 0))
+
+    def add_key(g):
+        return g + (" 柔剣" if kinds[g] == "日曜朝" and sunday_room == "柔剣" else "")
+
+    before = {g: p(g) for g in kinds}
+    actions = []
+    for _ in range(max_actions):
+        used, days = defaultdict(int), defaultdict(set)
+        for k, v in assign.items():
+            for i in v:
+                used[i] += 1
+                days[i].add(k[:10])
+        best = None
+        for b in kinds:
+            gain_b = p(b, 1) - p(b)
+            for i in ids:
+                if b[:10] in days[i]:
+                    continue
+                if used[i] < cap:   # 追加(上限に残りがあるID)。同点なら追加を優先、番号の大きいIDから
+                    cand = (gain_b, 1, i)
+                    if best is None or cand > best[0]:
+                        best = (cand, "追加", i, None, b)
+            for a in kinds:         # 取消→別の枠に申込(取消したあとも残す数は守る)
+                if a == b or ours(a) - 1 < floor[a]:
+                    continue
+                loss = p(a) - p(a, -1)
+                for k, v in assign.items():
+                    if group_of(k) != a:
+                        continue
+                    for i in v:
+                        if b[:10] in days[i] and b[:10] != a[:10]:
+                            continue
+                        cand = (gain_b - loss, 0, i)
+                        if best is None or cand > best[0]:
+                            best = (cand, "取消→申込", i, k, b)
+        if best is None or best[0][0] < min_gain:
+            break
+        (gain, _t, _i), kind, i, frm, b = best
+        if frm:
+            assign[frm].remove(i)
+        to = add_key(b)
+        assign.setdefault(to, []).append(i)
+        actions.append({"kind": kind, "id": i, "from": frm, "to": to, "gain": round(gain, 4)})
+
+    rows = []
+    avg = sum(before.values()) / len(before) if before else 0
+    for g in sorted(kinds):
+        o_now = sum(len(v) for k, v in current.items() if group_of(k) == g)
+        rows.append({"g": g, "kind": kinds[g], "ours": o_now, "others": others.get(g, 0),
+                     "total": o_now + others.get(g, 0), "rate": round(before[g], 4),
+                     "diff": round(before[g] - avg, 4), "ours_after": ours(g), "rate_after": round(p(g), 4)})
+    return {"rows": rows, "actions": actions,
+            "before": round(sum(before.values()), 3), "after": round(sum(p(g) for g in kinds), 3)}
