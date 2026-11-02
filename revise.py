@@ -170,6 +170,12 @@ def main():
     counts = parse_lottery_counts(html)
     closed = plan.parse_closed_days(html, year)
     cands = [(s[0], s[1], s[2]) for s in plan.candidate_slots(year, month) if s[0] not in closed]
+    if counts:
+        # 「抽選(n)」が出ていない枠(「×」など)は申し込めないので候補から外す
+        gone = [k for k in cands if k not in counts]
+        for k in gone:
+            print(f"[除外] {key_label(k)} は申し込めない枠(×など)なので候補から外します")
+        cands = [k for k in cands if k in counts]
     if not counts:
         print("[エラー] 「抽選(n)」の件数が1つも読み取れませんでした(画面の形式が変わった可能性)")
         sys.exit(1)
