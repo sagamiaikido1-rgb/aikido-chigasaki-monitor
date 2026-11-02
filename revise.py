@@ -129,21 +129,19 @@ def key_label(k):
     return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}) {k[1][:2]}-{k[2][:2]}時"
 
 
-KENDO_INCLUDES_JUDO = os.environ.get("KENDO_INCLUDES_JUDO", "1") == "1"   # 柔剣道場の「抽選(n)」は柔道場の分も含む(2026-11 の見立て)
-
-
 def others_by_group(groups, counts, current):
     """稽古枠ごとの他団体の申込数(柔道場＋柔剣道場の合計)。
-    counts: {枠(部屋付き): 抽選(n)}、current: {枠(部屋付き): [連盟のID]}"""
+    counts: {枠(部屋付き): 抽選(n)}、current: {枠(部屋付き): [連盟のID]}
+    2026-11-03 に実際の画面で確かめた数え方:
+      柔剣道場の「抽選(n)」= その時間帯の全部(柔道場・柔剣道場・剣道場への申込)
+      柔道場の「抽選(n)」  = 柔道場＋柔剣道場への申込(1/17: 連盟の柔道4＋柔剣5 = 抽選(9))
+    なので、柔剣道場の数があればそこから連盟の全部を引く。なければ柔道場の数から引く。"""
     out = {}
     for x in groups:
         g = x["g"]
         nj, nk = counts.get(g, 0), counts.get(g + " 柔剣")
-        oj, ok = len(current.get(g, [])), len(current.get(g + " 柔剣", []))
-        o = max(nj - oj, 0)
-        if nk is not None:
-            o += max((nk - nj if KENDO_INCLUDES_JUDO else nk) - ok, 0)
-        out[g] = o
+        ours = len(current.get(g, [])) + len(current.get(g + " 柔剣", []))
+        out[g] = max((nk if nk is not None else nj) - ours, 0)
     return out
 
 
