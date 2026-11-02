@@ -104,3 +104,19 @@ def test_review_rates_and_actions_respect_rules():
         assert len(mine) <= 4 and len({k[:10] for k in mine}) == len(mine)
     for g in (W(6), W(13), M(17)):
         assert sum(len(v) for k, v in after.items() if k[:20] == g) >= 8
+
+
+def test_review_plan_adds_first_moves_only_as_reference():
+    W = lambda d: f"2027-01-{d:02d} 1800-2100"  # noqa: E731
+    M = lambda d: f"2027-01-{d:02d} 0900-1200"  # noqa: E731
+    groups = [{"g": W(6), "kind": "水曜夜"}, {"g": W(13), "kind": "水曜夜"}, {"g": M(17), "kind": "日曜朝"}]
+    # 予備あり:追加だけで、取消の参考は出ない
+    cur = {W(6): list(range(1, 10)), W(13): list(range(10, 19)), M(17) + " 柔剣": [1, 2, 3, 4, 5, 14, 15, 16, 17]}
+    r = alloc.review_plan(groups, cur, {M(17): 3}, list(range(1, 19)))
+    assert r["adds"] and all(a["kind"] == "追加" for a in r["adds"]) and not r["moves_ref"]
+    # 予備なし(全IDが4件):追加は出ず、取消→申込が参考として出る
+    full = {W(6): list(range(1, 19)), W(13): list(range(1, 19)), M(17) + " 柔剣": list(range(1, 10)),
+            "2027-01-20 1800-2100": list(range(1, 19)), "2027-01-27 1800-2100": list(range(10, 19))}
+    r = alloc.review_plan(groups, full, {M(17): 6}, list(range(1, 19)))
+    assert r["spare_left"] == 0 and not r["adds"] and r["moves_ref"]
+    assert all(a["from"] for a in r["moves_ref"])

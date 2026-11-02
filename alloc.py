@@ -226,7 +226,7 @@ def win_rate(ours, others):
 
 
 def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_actions=REVIEW_MAX,
-           keep_floor=KEEP_FLOOR, sunday_room="柔剣"):
+           keep_floor=KEEP_FLOOR, sunday_room="柔剣", allow_add=True, allow_move=True):
     """groups:  [{"g": 稽古枠, "kind": "日曜朝"/"水曜夜"/"日曜夜"}]
     current: 今の連盟の申込 {枠(部屋付き): [ID番号]}
     others:  他団体の申込数 {稽古枠: 件数}(柔道場＋柔剣道場の合計)
@@ -258,12 +258,12 @@ def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_
             for i in ids:
                 if b[:10] in days[i]:
                     continue
-                if used[i] < cap:   # 追加(上限に残りがあるID)。同点なら追加を優先、番号の大きいIDから
+                if allow_add and used[i] < cap:   # 追加(上限に残りがあるID)。同点なら追加を優先、番号の大きいIDから
                     cand = (gain_b, 1, i)
                     if best is None or cand > best[0]:
                         best = (cand, "追加", i, None, b)
             for a in kinds:         # 取消→別の枠に申込(取消したあとも残す数は守る)
-                if a == b or ours(a) - 1 < floor[a]:
+                if not allow_move or a == b or ours(a) - 1 < floor[a]:
                     continue
                 loss = p(a) - p(a, -1)
                 for k, v in assign.items():
@@ -293,3 +293,34 @@ def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_
                      "diff": round(before[g] - avg, 4), "ours_after": ours(g), "rate_after": round(p(g), 4)})
     return {"rows": rows, "actions": actions,
             "before": round(sum(before.values()), 3), "after": round(sum(p(g) for g in kinds), 3)}
+
+
+def apply_actions(current, actions):
+    out = {k: list(v) for k, v in current.items()}
+    for a in actions:
+        if a["from"]:
+            out[a["from"]].remove(a["id"])
+        out.setdefault(a["to"], []).append(a["id"])
+    return out
+
+
+def review_plan(groups, current, others, ids, cap=CAP, **kw):
+    """2〜15日の見直し(2026-11 決定)。
+    1) 案:取り消さず、9件を超えてでも、上限に残りのあるIDで足す「追加」だけ
+    2) 参考:追加でこれ以上上げられない(予備を使い切った・その日に使えるIDがない)ときだけ、
+       追加後の状態から「取消→申込」を別に出す。実行するかは代表代行が決める
+    → {"rows", "adds", "moves_ref", "before", "after_adds", "after_all", "spare_left"}"""
+    kw.pop("allow_add", None)
+    kw.pop("allow_move", None)
+    first = review(groups, current, others, ids, cap=cap, allow_move=False, **kw)
+    after_adds = apply_actions(current, first["actions"])
+    ref = review(groups, after_adds, others, ids, cap=cap, allow_add=False, **kw)
+    spare = cap * len(ids) - sum(len(v) for v in after_adds.values())
+    rows = first["rows"]
+    after_all = apply_actions(after_adds, ref["actions"])
+    for r in rows:
+        r["ours_ref"] = sum(len(v) for k, v in after_all.items() if group_of(k) == r["g"])
+        r["rate_ref"] = round(win_rate(r["ours_ref"], r["others"]), 4)
+    return {"rows": rows, "adds": first["actions"], "moves_ref": ref["actions"],
+            "before": first["before"], "after_adds": first["after"], "after_all": ref["after"],
+            "spare_left": spare}
