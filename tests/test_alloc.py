@@ -46,3 +46,22 @@ def test_sun_kendo_from():
     assert alloc.sun_kendo_from("3") == 3
     assert alloc.sun_kendo_from("12") == 9
     assert alloc.sun_kendo_from("abc") == 5
+
+
+def test_diff_keeps_existing_and_fills_to_target():
+    slots, _, _, _ = jan()
+    ex = {}
+    for k in ["2027-01-06 1800-2100", "2027-01-13 1800-2100", "2027-01-20 1800-2100", "2027-01-27 1800-2100"]:
+        ex.setdefault(k, []).append(10)
+    for i in (12, 14, 16, 18):
+        for k in ["2027-01-13 1800-2100", "2027-01-17 0900-1200", "2027-01-27 1800-2100", "2027-01-31 0900-1200"]:
+            ex.setdefault(k, []).append(i)
+    ids = list(range(1, 19))
+    add, rem, short = alloc.allocate(slots, ids, existing=ex)
+    r = alloc.diff_report(slots, ids, ex, add)
+    assert not short and r["total"] == {"max": 72, "now": 20, "add": 36, "after_left": 16}
+    assert all(x["after"] == x["target"] for x in r["slots"])
+    assert all(x["after_left"] >= 0 for x in r["ids"])
+    for key, lst in add.items():           # 今ある申込と同じ日に同じIDを入れない
+        for i in lst:
+            assert not any(i in v and k[:10] == key[:10] for k, v in ex.items())

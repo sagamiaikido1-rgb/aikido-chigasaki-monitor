@@ -74,17 +74,46 @@ def build_slots(year, month, avail, sun_kendo=SUN_KENDO, per_slot=PER_SLOT):
     return slots, skipped
 
 
-def allocate(slots, ids, cap=CAP):
+def allocate(slots, ids, cap=CAP, existing=None):
     """取りにくい枠(難しさが大きい)から順に、その日まだ使っていないIDを入れる。
     難しい枠(日曜朝)は番号の大きいIDから、易しい枠(日曜夜)は番号の小さいIDから。
-    水曜夜は番号の大きい順だが、残り件数の多いIDを優先して偏りを抑える。"""
+    水曜夜は番号の大きい順だが、残り件数の多いIDを優先して偏りを抑える。
+
+    existing: いま申し込んである分 {枠: [ID番号]}(修正のとき)。これは消さずに残し、
+    目標(1枠9件・日曜夜1件)に足りない分だけを、各IDの残り件数の中で足す。
+    → (追加分 {枠: [ID]}, IDごとの残り件数, 足りなかった枠)"""
+    existing = existing or {}
     remain = {i: cap for i in ids}
     used_day = {i: set() for i in ids}
-    assign = {s[0]: [] for s in slots}
+    for key, lst in existing.items():
+        for i in lst:
+            if i in remain:
+                remain[i] -= 1
+                used_day[i].add(key[:10])
+    need_of = {s[0]: max(0, s[4] - len(existing.get(s[0], []))) for s in slots}
+    # 日曜朝は柔道場＋柔剣道場の合計で目標に合わせる(片方が多く入っていれば、もう片方を減らす)
+    by_day = {}
+    for s in slots:
+        if s[2] == "日曜朝":
+            by_day.setdefault(s[1], {})[s[3]] = s
+    for d, rooms in by_day.items():
+        target = sum(s[4] for s in rooms.values())
+        have = sum(len(existing.get(s[0], [])) for s in rooms.values())
+        total_need = max(0, target - have)
+        k, j = rooms.get("柔剣"), rooms.get("柔道")
+        nk = min(total_need, need_of[k[0]]) if k else 0
+        if not j:
+            nk = total_need
+        if k:
+            need_of[k[0]] = nk
+        if j:
+            need_of[j[0]] = total_need - nk
+    add = {s[0]: [] for s in slots}
     order = sorted(slots, key=lambda s: (-s[5], s[1]))
     short = []
-    for key, d, kind, room, need, diff in order:
-        free = [i for i in ids if remain[i] > 0 and d not in used_day[i]]
+    for key, d, kind, room, _target, diff in order:
+        need = need_of[key]
+        free = [i for i in ids if remain[i] > 0 and d.isoformat() not in used_day[i]]
         if diff >= 3:      # 日曜朝:番号の大きい順
             free.sort(key=lambda i: -i)
         elif diff == 1:    # 日曜夜:番号の小さい順
@@ -94,11 +123,59 @@ def allocate(slots, ids, cap=CAP):
         pick = free[:need]
         for i in pick:
             remain[i] -= 1
-            used_day[i].add(d)
-        assign[key] = sorted(pick)
+            used_day[i].add(d.isoformat())
+        add[key] = sorted(pick)
         if len(pick) < need:
             short.append((key, need - len(pick)))
-    return assign, remain, short
+    return add, remain, short
+
+
+def room_of(key):
+    return "柔剣" if key.endswith("柔剣") else "柔道"
+
+
+def diff_report(slots, ids, existing, add, cap=CAP):
+    """申込差分の表(管理画面とメール用)。団体名は含めない。
+    slot_rows: 枠ごとの 目標・現在・追加・追加後
+    id_rows:   IDごとの 現在(柔道/柔剣)・残り・追加・追加後の残り
+    outside:   目標に入っていない枠への今の申込(「×」になった日など。消さずに表示だけ)"""
+    keys = {s[0] for s in slots}
+    slot_rows = []
+    for key, d, kind, room, target, _diff in sorted(slots, key=lambda s: (s[1], s[0])):
+        now = len(existing.get(key, []))
+        slot_rows.append({"key": key, "kind": kind, "room": room, "target": target,
+                          "now": now, "add": len(add.get(key, [])), "after": now + len(add.get(key, [])),
+                          "add_ids": add.get(key, [])})
+    id_rows = []
+    for i in ids:
+        now = {"柔道": 0, "柔剣": 0}
+        for key, lst in existing.items():
+            if i in lst:
+                now[room_of(key)] += 1
+        plus = {"柔道": 0, "柔剣": 0}
+        for key, lst in add.items():
+            if i in lst:
+                plus[room_of(key)] += 1
+        used = now["柔道"] + now["柔剣"]
+        id_rows.append({"id": i, "now_judo": now["柔道"], "now_kendo": now["柔剣"], "now": used,
+                        "left": cap - used, "add_judo": plus["柔道"], "add_kendo": plus["柔剣"],
+                        "after_left": cap - used - plus["柔道"] - plus["柔剣"]})
+    outside = {k: v for k, v in existing.items() if k not in keys and v}
+    total = {"max": cap * len(ids), "now": sum(r["now"] for r in id_rows),
+             "add": sum(r["add_judo"] + r["add_kendo"] for r in id_rows)}
+    total["after_left"] = total["max"] - total["now"] - total["add"]
+    return {"slots": slot_rows, "ids": id_rows, "outside": outside, "total": total}
+
+
+def slot_summary(slots, skipped):
+    """「予約枠がいくつあるか」の要約。"""
+    from collections import Counter
+    days = Counter()
+    for s in slots:
+        days[(s[2], s[1])] += 0
+    c = Counter(kind for (kind, _d) in days)
+    return {"日曜朝": c.get("日曜朝", 0), "日曜夜": c.get("日曜夜", 0), "水曜夜": c.get("水曜夜", 0),
+            "外した枠": [(d.isoformat(), kind, why) for d, kind, why in skipped]}
 
 
 def to_applications(assign, ids):
