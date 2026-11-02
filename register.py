@@ -100,9 +100,9 @@ def encode(x):
     return {"stringValue": str(x)}
 
 
-def fs_get(ym, token):
+def fs_get(ym, token, collection=COLLECTION):
     try:
-        r = _http("GET", f"{FS_BASE}/{COLLECTION}/{ym}?key={API_KEY}", token=token)
+        r = _http("GET", f"{FS_BASE}/{collection}/{ym}?key={API_KEY}", token=token)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
@@ -190,6 +190,37 @@ def row_slot(r, y, m):
 
 
 ACTIVE = ("抽選待ち", "抽選中", "受付")
+
+
+def read_current(browser, accounts, y, m, only=0):
+    """全IDの今の申込(抽選待ち。総合体育館の柔道場・柔剣道場のみ)。→ ({ID: set(枠)}, 読めなかったID, {ID: 団体名})"""
+    import lottery_check as lc
+    import plan
+    current, failed = defaultdict(set), []
+    for (i, uid, pw) in accounts:
+        if only and i != only:
+            continue
+        if i > 1:
+            time.sleep(3)
+        try:
+            for r in plan.read_lottery_only(browser, uid, pw, [(y, m)]):
+                k = row_slot(r, y, m)
+                if k and any(w in r["status"] for w in ACTIVE):
+                    current[i].add(k)
+        except Exception as e:
+            failed.append(i)
+            print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
+    names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
+    return current, failed, names
+
+
+def read_rules(token):
+    """管理画面で代表が決める設定(lottery_settings/rules)。読めなければ空。"""
+    try:
+        return fs_get("rules", token, collection="lottery_settings") or {}
+    except Exception as e:
+        print(f"[設定] 読めませんでした({err_text(e)})。既定値で進めます")
+        return {}
 
 
 def slot_text(s):

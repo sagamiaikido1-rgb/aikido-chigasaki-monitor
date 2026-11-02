@@ -77,3 +77,15 @@ assert av[(date(2027, 1, 10), "夜", "柔道")] == "○" and av[(date(2027, 1, 3
 assert av[(date(2027, 1, 17), "朝", "柔剣")] == "○" and cnt[(date(2027, 1, 17), "0900", "1200", "柔剣")] == 2
 assert av[(date(2027, 1, 13), "夜", "柔道")] == "×"   # 表に無い枠は申し込めない扱い
 print("availability ok")
+
+# 1日の申込案の JSON(管理画面が読む形)
+import alloc
+r1 = alloc.make_plan(2027, 1, av, list(range(1, 19)), existing={"2027-01-06 1800-2100": [10]})
+j = plan.day1_json((2027, 1), r1, {10: {"2027-01-06 1800-2100"}}, [], 5, cnt)
+assert j["version"] == 2 and j["stage"] == "day1" and j["per_slot"] == 9
+assert j["current"] == {"10": ["2027-01-06 1800-2100"]}
+assert len(j["add"]["2027-01-06 1800-2100"]) == 8 and 10 not in j["add"]["2027-01-06 1800-2100"]
+assert j["counts"]["2027-01-17 0900-1200 柔剣"] == 2
+assert any(s["key"] == "2027-01-10 1800-2100" and s["kind"] == "日曜夜" for s in j["slots"])
+import json as _json; _json.dumps(j)
+print("day1 json ok")
