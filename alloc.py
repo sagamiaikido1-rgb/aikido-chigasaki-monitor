@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 PER_SLOT = 9            # 1枠あたりの当方の件数
 CAP = 4                 # 1IDあたりの上限(総合体育館)
-SUN_KENDO = 5           # 日曜朝9件のうち柔剣道場に回す件数(残りは柔道場)
+SUN_KENDO = 5           # 日曜朝9件のうち柔剣道場に回す件数(残りは柔道場)。変えられる(下の sun_kendo_from)
 NG_MARKS = ("×", "-", "－", "休館")
 
 MORNING = ("0900", "1200")
@@ -33,7 +33,16 @@ def is_ok(mark):
     return mark is not None and not any(n in mark for n in NG_MARKS)
 
 
-def build_slots(year, month, avail):
+def sun_kendo_from(value, per_slot=PER_SLOT):
+    """日曜朝のうち柔剣道場に回す件数。管理画面・入力欄の値(空欄なら SUN_KENDO)を 0〜1枠の件数 に収める。"""
+    try:
+        n = int(str(value).strip()) if str(value).strip() else SUN_KENDO
+    except ValueError:
+        n = SUN_KENDO
+    return max(0, min(per_slot, n))
+
+
+def build_slots(year, month, avail, sun_kendo=SUN_KENDO, per_slot=PER_SLOT):
     """avail: {(date, "朝"/"夜", "柔道"/"柔剣"): 記号}。読めなかった枠は None 扱い。
     → 申し込む枠のリスト [(key, date, 区分, 部屋, 件数, 難しさ)] と、外した枠の理由。"""
     slots, skipped = [], []
@@ -42,17 +51,17 @@ def build_slots(year, month, avail):
         if d.weekday() == 2:  # 水曜夜(柔道場のみ)
             m = avail.get((d, "夜", "柔道"))
             if is_ok(m):
-                slots.append((slot_key(d, *EVENING, "柔道"), d, "水曜夜", "柔道", PER_SLOT, 2))
+                slots.append((slot_key(d, *EVENING, "柔道"), d, "水曜夜", "柔道", per_slot, 2))
             else:
                 skipped.append((d, "水曜夜", m))
         elif d.weekday() == 6:  # 日曜朝(柔道場＋柔剣道場で9件)
             j, k = avail.get((d, "朝", "柔道")), avail.get((d, "朝", "柔剣"))
             if is_ok(j) or is_ok(k):
-                nk = (SUN_KENDO if is_ok(j) else PER_SLOT) if is_ok(k) else 0
+                nk = (sun_kendo if is_ok(j) else per_slot) if is_ok(k) else 0
                 if nk:
                     slots.append((slot_key(d, *MORNING, "柔剣"), d, "日曜朝", "柔剣", nk, 4))
-                if PER_SLOT - nk:
-                    slots.append((slot_key(d, *MORNING, "柔道"), d, "日曜朝", "柔道", PER_SLOT - nk, 3))
+                if per_slot - nk:
+                    slots.append((slot_key(d, *MORNING, "柔道"), d, "日曜朝", "柔道", per_slot - nk, 3))
             else:
                 reason = f"朝 柔道{j or '?'}・柔剣{k or '?'}"
                 n = avail.get((d, "夜", "柔道"))
