@@ -19,7 +19,7 @@ import check_availability as ca
 import lottery_check as lc
 import plan
 
-SLOT_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2}) (\d{4})-(\d{4})$")
+SLOT_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2}) (\d{4})-(\d{4})(?: (柔剣))?$")   # 末尾「 柔剣」= 総合体育館 柔剣道場
 PEOPLE = os.environ.get("APPLY_PEOPLE", "20")
 PURPOSE = os.environ.get("APPLY_PURPOSE", "合気道")
 
@@ -32,11 +32,22 @@ def parse_slot(s):
     m = SLOT_RE.match(s)
     if not m:
         raise ApplyError(f"枠の書き方が正しくありません: {s}")
-    y, mo, d, st, en = m.groups()
+    y, mo, d, st, en, _room = m.groups()
     return int(y), int(mo), int(d), st, en
 
 
+def room_of(s):
+    """枠の部屋。末尾に「柔剣」が付いていれば柔剣道場、なければ柔道場(どちらも総合体育館)。"""
+    return "柔剣道場" if s.endswith(" 柔剣") else "柔道場"
+
+
 def slot_words(s):
+    y, mo, d, st, en = parse_slot(s)
+    return f"{mo}/{d} {st[:2]}:{st[2:]}-{en[:2]}:{en[2:]}" + ("(柔剣道場)" if room_of(s) == "柔剣道場" else "")
+
+
+def tray_words(s):
+    """申込トレイの行と照合するときの書き方(部屋名は含めない)。"""
     y, mo, d, st, en = parse_slot(s)
     return f"{mo}/{d} {st[:2]}:{st[2:]}-{en[:2]}:{en[2:]}"
 
@@ -145,34 +156,53 @@ def fill_info(page, log):
 
 # ---------------------------------------------------------------- 追加
 
-def add_slots(page, year, month, slots, log, stop_before=False):
-    """枠をまとめて選び、申込トレイから申し込む。→ 申し込んだ枠の数"""
+def add_slots(page, year, month, slots, log, stop_before=False, skipped=None):
+    """枠を部屋(柔道場・柔剣道場)ごとに選んで申込トレイに入れ、まとめて申し込む。→ 申し込んだ枠の数
+    「×」など申し込めない枠は飛ばして skipped に入れ、そのIDの残りの枠は続ける(11/1の反省)。"""
+    skipped = skipped if skipped is not None else []
     clear_tray(page, log)
-    plan.open_lottery_page(page, year, month)
-    try:
-        ca.click_by_text(page, "再読込・選択クリア", exact=False, timeout_ms=3000)
-        page.wait_for_timeout(1500)
-    except Exception:
-        pass
-    for s in slots:
-        y, mo, d, st, en = parse_slot(s)
-        before = page.evaluate(MARK_CELL_JS, [y, mo, d, st + en])
-        if before is None:
-            raise ApplyError(f"{slot_words(s)} の枠が表にありません(受付外・休館・予約済みの可能性)")
-        if "抽選" not in before and "選択" not in before:
-            raise ApplyError(f"{slot_words(s)} は申し込めない状態です({before})")
-        if "選択" not in before:
-            page.locator("[data-claude-target]").first.click()
-            page.wait_for_timeout(800)
-        after = page.evaluate(CELL_TEXT_JS)
-        if after is None or "選択" not in after:
-            raise ApplyError(f"{slot_words(s)} を選べませんでした({after})")
-        log(f"  選択: {slot_words(s)}")
-    _click(page, "申込トレイに入れる")
+    chosen = []
+    for room in ("柔道場", "柔剣道場"):
+        mine = [s for s in slots if room_of(s) == room]
+        if not mine:
+            continue
+        plan.open_lottery_page(page, year, month, room)
+        try:
+            ca.click_by_text(page, "再読込・選択クリア", exact=False, timeout_ms=3000)
+            page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        picked = []
+        for s in mine:
+            y, mo, d, st, en = parse_slot(s)
+            before = page.evaluate(MARK_CELL_JS, [y, mo, d, st + en])
+            if before is None or ("抽選" not in before and "選択" not in before):
+                log(f"  [飛ばす] {slot_words(s)} は申し込めない枠です({before or '表にありません'})")
+                skipped.append(s)
+                continue
+            if "選択" not in before:
+                page.locator("[data-claude-target]").first.click()
+                page.wait_for_timeout(800)
+            after = page.evaluate(CELL_TEXT_JS)
+            if after is None or "選択" not in after:
+                log(f"  [飛ばす] {slot_words(s)} を選べませんでした({after})")
+                skipped.append(s)
+                continue
+            picked.append(s)
+            log(f"  選択: {slot_words(s)}")
+        if picked:
+            _click(page, "申込トレイに入れる")
+            if _heading(page) != "申込トレイ":
+                raise ApplyError(f"申込トレイの画面になりませんでした({_heading(page)})")
+            chosen += picked
+    if not chosen:
+        log("  申し込める枠がありませんでした")
+        return 0
     if _heading(page) != "申込トレイ":
-        raise ApplyError(f"申込トレイの画面になりませんでした({_heading(page)})")
+        lc.go_menu_item(page, "申込トレイ")
+        page.wait_for_timeout(1200)
     rows = tray_rows(page)
-    want = sorted(slot_words(s) for s in slots)
+    want = sorted(tray_words(s) for s in chosen)
     if sorted(rows) != want:
         raise ApplyError(f"申込トレイの中身が合いません(トレイ {rows} / 予定 {want})")
     fill_info(page, log)
@@ -192,12 +222,14 @@ def add_slots(page, year, month, slots, log, stop_before=False):
 
 # ---------------------------------------------------------------- 取消
 
-MARK_ROW_JS = """(pat) => {
+MARK_ROW_JS = """([pat, room]) => {
   document.querySelectorAll('[data-claude-target]').forEach(e => e.removeAttribute('data-claude-target'));
   const re = new RegExp(pat);
   for (const tr of document.querySelectorAll('tr')) {
     const t = (tr.innerText || '').replace(/\\s+/g, ' ');
-    if (!re.test(t) || t.indexOf('抽選待ち') < 0 || t.indexOf('柔道場') < 0 || t.indexOf('柔剣道場') >= 0) continue;
+    if (!re.test(t) || t.indexOf('抽選待ち') < 0 || t.indexOf('総合体育館') < 0) continue;
+    const kendo = t.indexOf('柔剣道場') >= 0;
+    if (room === '柔剣道場' ? !kendo : (kendo || t.indexOf('柔道場') < 0)) continue;
     const b = [...tr.querySelectorAll('a,button,input[type=button],input[type=submit]')]
       .find(e => ((e.innerText || e.value || '').trim()) === '申込内容');
     if (b) { b.setAttribute('data-claude-target', '1'); return true; }
@@ -223,7 +255,7 @@ def cancel_slot(page, s, log, stop_before=False):
     y, mo, d, st, en = parse_slot(s)
     open_lottery_list(page, y, mo)
     pat = rf"{y}\s*\(\s*令和\s*\d+\s*\)\s*年\s*{mo}\s*月\s*{d}\s*日.*{int(st[:2]):02d}:{st[2:]}\s*-\s*{int(en[:2]):02d}:{en[2:]}"
-    if not page.evaluate(MARK_ROW_JS, pat):
+    if not page.evaluate(MARK_ROW_JS, [pat, room_of(s)]):
         raise ApplyError(f"取消する申込 {slot_words(s)} が抽選申込一覧にありません")
     page.locator("[data-claude-target]").first.click()
     page.wait_for_timeout(1500)
@@ -242,7 +274,7 @@ def cancel_slot(page, s, log, stop_before=False):
 
 # ---------------------------------------------------------------- 1つのID
 
-def apply_for_account(browser, uid, pw, year, month, adds, cancels, log=print, stop_before=False):
+def apply_for_account(browser, uid, pw, year, month, adds, cancels, log=print, stop_before=False, skipped=None):
     """取消 → 追加 の順に行う(上限いっぱいのとき先に枠を空けるため)。→ (追加した数, 取消した数)"""
     ctx = browser.new_context()
     page = ctx.new_page()
@@ -255,7 +287,7 @@ def apply_for_account(browser, uid, pw, year, month, adds, cancels, log=print, s
                 n_cancel += 1
         n_add = 0
         if adds:
-            n_add = add_slots(page, year, month, adds, log, stop_before)
+            n_add = add_slots(page, year, month, adds, log, stop_before, skipped)
         return n_add, n_cancel
     except Exception:
         log(f"  [診断] 止まった画面: {_heading(page)}")

@@ -152,19 +152,59 @@ def diff(desired, current):
     return add, cancel
 
 
+def planned_changes(doc, current):
+    """代表代行が確定した内容から、実際に行う追加・取消を決める。
+    doc["actions"] = {"ID番号": {"add": [枠], "cancel": [枠]}} (管理画面の新しい形)
+      → 書いてあるものだけを行う。今すでにある追加・もう無い取消は飛ばす。
+    actions が無い(前の形 applications だけ)のときは、足りない分の追加だけを行い、取消は一切しない。
+    どちらの場合も、確定した表に書かれていない申込(手で入れた分など)には触れない(11/1の反省)。
+    → (追加 {ID: [...]}, 取消 {ID: [...]})"""
+    add, cancel = {}, {}
+    acts = doc.get("actions")
+    if acts:
+        for k, v in acts.items():
+            i = int(k)
+            a = [x for x in (v or {}).get("add", []) if x not in current.get(i, set())]
+            c = [x for x in (v or {}).get("cancel", []) if x in current.get(i, set())]
+            if a:
+                add[i] = sorted(a)
+            if c:
+                cancel[i] = sorted(c)
+        return add, cancel
+    desired = {int(k): set(v) for k, v in (doc.get("applications") or {}).items()}
+    add, _ = diff(desired, current)
+    return add, {}
+
+
+def row_slot(r, y, m):
+    """抽選申込一覧の1行 → 枠の文字列。総合体育館の柔道場・柔剣道場以外(市体育館など)は None。"""
+    if (r["year"], r["month"]) != (y, m) or "総合体育館" not in r["text"]:
+        return None
+    if "柔剣道場" in r["text"]:
+        room = " 柔剣"
+    elif "柔道場" in r["text"]:
+        room = ""
+    else:
+        return None
+    return f"{y}-{m:02d}-{r['day']:02d} {r['start']}-{r['end']}{room}"
+
+
+ACTIVE = ("抽選待ち", "抽選中", "受付")
+
+
 def slot_text(s):
     d = date.fromisoformat(s[:10])
-    return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}){s[11:13]}時"
+    return f"{d.month}/{d.day}({'月火水木金土日'[d.weekday()]}){s[11:13]}時" + ("・柔剣道場" if s.endswith(" 柔剣") else "")
 
 
 # ---------------------------------------------------------------- 実行
 
-def apply_changes(browser, uid, pw, year, month, adds, cancels, stop_before=False, notice=False):
+def apply_changes(browser, uid, pw, year, month, adds, cancels, stop_before=False, notice=False, skipped=None):
     """1つのIDで、取消 → 追加 を行う(apply.py)。→ (追加した数, 取消した数)
     notice=True(テスト)のときは、経過を Actions の注記にも出す(実行結果の画面ですぐ見られるように)。"""
     import apply
     log = (lambda t: print("::notice::" + t.strip())) if notice else print
-    return apply.apply_for_account(browser, uid, pw, year, month, adds, cancels, log, stop_before)
+    return apply.apply_for_account(browser, uid, pw, year, month, adds, cancels, log, stop_before, skipped)
 
 
 def names_test():
@@ -313,21 +353,22 @@ def main():
                 time.sleep(3)
             try:
                 for r in plan.read_lottery_only(browser, uid, pw, [(y, m)]):
-                    if (r["year"], r["month"]) != (y, m) or "柔道場" not in r["text"] or "柔剣道場" in r["text"]:
-                        continue
-                    if any(w in r["status"] for w in ("抽選待ち", "抽選中", "受付")):
-                        current[i].add(f"{y}-{m:02d}-{r['day']:02d} {r['start']}-{r['end']}")
+                    k = row_slot(r, y, m)
+                    if k and any(w in r["status"] for w in ACTIVE):
+                        current[i].add(k)
             except Exception as e:
                 failed.append(i)
                 print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
-        adds, cancels = diff(desired, current)
+        adds, cancels = planned_changes(doc, current)
+        if not doc.get("actions"):
+            print("[注意] 確定内容に追加・取消の指示(actions)がないため、足りない分の追加だけを行います(取消はしません)")
         if test_id:
             adds = {k: v for k, v in adds.items() if k == test_id}
             cancels = {k: v for k, v in cancels.items() if k == test_id}
             desired = {k: v for k, v in desired.items() if k == test_id}
         if test_limit:
             adds = {k: v[:test_limit] for k, v in adds.items()}
-        done_ok, done_ng, apply_failed = 0, 0, []
+        done_ok, done_ng, apply_failed, skipped_by = 0, 0, [], {}
         if live or stop_before:
             for (i, uid, pw) in accounts:
                 if i in failed or (i not in adds and i not in cancels):
@@ -335,7 +376,10 @@ def main():
                 time.sleep(3)
                 print(("::notice::" if testing else "") + f"[ID{i}] 取消 {len(cancels.get(i, []))}件 → 追加 {len(adds.get(i, []))}件")
                 try:
-                    na, nc = apply_changes(browser, uid, pw, y, m, adds.get(i, []), cancels.get(i, []), stop_before, testing)
+                    sk = []
+                    na, nc = apply_changes(browser, uid, pw, y, m, adds.get(i, []), cancels.get(i, []), stop_before, testing, sk)
+                    if sk:
+                        skipped_by[i] = sk
                     done_ok += 1
                 except Exception as e:
                     done_ng += 1
@@ -354,15 +398,14 @@ def main():
                     if i not in adds and i not in cancels:
                         continue
                     try:
-                        now = {f"{y}-{m:02d}-{r['day']:02d} {r['start']}-{r['end']}"
-                               for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
-                               if (r["year"], r["month"]) == (y, m) and "柔道場" in r["text"] and "柔剣道場" not in r["text"]
-                               and any(w in r["status"] for w in ("抽選待ち", "抽選中", "受付"))}
-                        a2, c2 = diff({i: desired.get(i, set())}, {i: now})
-                        if a2 or c2:
+                        now = {row_slot(r, y, m) for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
+                               if row_slot(r, y, m) and any(w in r["status"] for w in ACTIVE)}
+                        missing = [x for x in adds.get(i, []) if x not in now and x not in skipped_by.get(i, [])]
+                        left = [x for x in cancels.get(i, []) if x in now]
+                        if missing or left:
                             if i not in apply_failed:
                                 apply_failed.append(i)
-                            print(f"::warning::[確認] ID{i} は確定した表とまだ違います(足りない {len(a2.get(i, []))}件・余分 {len(c2.get(i, []))}件)")
+                            print(f"::warning::[確認] ID{i} は確定した内容とまだ違います(入っていない追加 {len(missing)}件・残っている取消 {len(left)}件)")
                     except Exception as e:
                         print(f"[確認] ID{i} を読み直せませんでした({type(e).__name__})")
         browser.close()
@@ -381,6 +424,13 @@ def main():
         lines_mail.append(f"  {lc.who_label(i, names.get(i, ''))}  {part}")
     if not adds and not cancels:
         lines_mail.append("  今の申込は確定した案と同じです。変更はありません。")
+    if live and skipped_by:
+        sk = "、".join(f"ID{i}: " + "・".join(slot_text(x) for x in v) for i, v in sorted(skipped_by.items()))
+        lines_admin.append("申し込めずに飛ばした枠(×など): " + sk)
+        lines_mail.append("")
+        lines_mail.append("※ 申し込めずに飛ばした枠(×など。そのIDの残りの申込は行いました):")
+        for i, v in sorted(skipped_by.items()):
+            lines_mail.append(f"  {lc.who_label(i, names.get(i, ''))}  " + "、".join(slot_text(x) for x in v))
     if live and apply_failed:
         lines_admin.append("登録できなかった・表と合わないID: " + "、".join(map(str, sorted(apply_failed))))
         lines_mail.append("")

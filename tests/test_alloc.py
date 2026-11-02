@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import date
 import alloc
 
@@ -120,3 +122,10 @@ def test_review_plan_adds_first_moves_only_as_reference():
     r = alloc.review_plan(groups, full, {M(17): 6}, list(range(1, 19)))
     assert r["spare_left"] == 0 and not r["adds"] and r["moves_ref"]
     assert all(a["from"] for a in r["moves_ref"])
+
+
+if __name__ == "__main__":
+    for _n, _f in list(globals().items()):
+        if _n.startswith("test_") and callable(_f):
+            _f()
+    print("alloc ok")

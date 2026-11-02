@@ -614,3 +614,65 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------- 空き状況(柔道場・柔剣道場)
+
+COUNT_RE = re.compile(r"抽選\s*[(（]\s*(\d+)\s*[)）]")
+CELL_DATE_RE = re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})")
+CELL_TIME_RE = re.compile(r"['\"](\d{2})(\d{2})(\d{2})(\d{2})['\"]")
+
+
+def parse_cells(html):
+    """抽選申込画面(月の表)のHTML → {(date, "HHMM", "HHMM"): (記号, 抽選の件数 or None)}
+    日付・時間帯は、セルの onclick などに書かれた 'YYYY/M/D' と 'HHMMHHMM' で決める。
+    「抽選(n)」があれば ○、ほかは書かれている文字(×・-・休館)をそのまま記号にする。"""
+    out = {}
+    for td in re.findall(r"<td[^>]*>.*?</td>", html, re.IGNORECASE | re.DOTALL):
+        d, t = CELL_DATE_RE.search(td), CELL_TIME_RE.search(td)
+        if not d or not t:
+            continue
+        key = (date(int(d.group(1)), int(d.group(2)), int(d.group(3))),
+               t.group(1) + t.group(2), t.group(3) + t.group(4))
+        text = lc.cell_text(td).strip()
+        m = COUNT_RE.search(text)
+        if m:
+            out[key] = ("○", int(m.group(1)))
+        elif "休館" in text:
+            out[key] = ("休館", None)
+        elif "×" in text:
+            out[key] = ("×", None)
+        else:
+            out[key] = (text[:6] or "-", None)
+    return out
+
+
+def availability(html_by_room, year, month):
+    """{"柔道": HTML, "柔剣": HTML} → alloc.build_slots に渡す空き状況と、部屋ごとの抽選件数。
+    表で日時が読めない枠は、申し込めない(「×」)として扱う(11/1 の「×」の日と同じ扱い)。
+    → (avail {(date, "朝"/"夜", "柔道"/"柔剣"): 記号}, counts {(date, start, end, 部屋): 件数}, 診断の行)"""
+    avail, counts, diag = {}, {}, []
+    for room, html in html_by_room.items():
+        if html is None:
+            diag.append(f"[空き状況] {room}の表を読めませんでした(この部屋は申し込まない扱い)")
+            continue
+        cells = parse_cells(html)
+        closed = parse_closed_days(html, year)
+        d = date(year, month, 1)
+        while d.month == month:
+            want = []
+            if d.weekday() == 6:
+                want = [("朝", "0900", "1200"), ("夜", "1800", "2100")] if room == "柔道" else [("朝", "0900", "1200")]
+            elif d.weekday() == 2 and room == "柔道":
+                want = [("夜", "1800", "2100")]
+            for slot, st, en in want:
+                if d in closed:
+                    mark, n = "休館", None
+                else:
+                    mark, n = cells.get((d, st, en), ("×", None))
+                avail[(d, slot, room)] = mark
+                if n is not None:
+                    counts[(d, st, en, room)] = n
+            d += timedelta(days=1)
+        diag.append(f"[空き状況] {room}: 読めたセル {len(cells)}件 / 休館日 {len(closed)}日")
+    return avail, counts, diag

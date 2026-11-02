@@ -21,3 +21,21 @@ assert not rg.needs_run(d) and rg.needs_run(d, reprocess=True)
 assert not rg.needs_run(dict(d, status="登録中"), reprocess=True)
 assert not rg.needs_run({"status": "確認のみ"}, reprocess=True)
 print("reprocess ok")
+
+# 柔剣道場と、確定した指示(actions)だけを行うこと
+r = lambda day, st, en, text, status="抽選待ち": {"year": 2027, "month": 1, "day": day, "start": st, "end": en, "text": text, "status": status}
+assert rg.row_slot(r(17, "0900", "1200", "総合体育館 柔剣道場"), 2027, 1) == "2027-01-17 0900-1200 柔剣"
+assert rg.row_slot(r(13, "1800", "2100", "総合体育館 柔道場"), 2027, 1) == "2027-01-13 1800-2100"
+assert rg.row_slot(r(31, "0900", "1200", "市体育館 柔剣道場"), 2027, 1) is None
+cur = {11: {"2027-01-13 0900-1200", "2027-01-13 1800-2100"}, 9: {"2027-01-31 1800-2100 柔剣"}}
+doc = {"actions": {"11": {"cancel": ["2027-01-13 0900-1200"], "add": ["2027-01-31 0900-1200 柔剣"]},
+                   "9": {"cancel": ["2027-01-31 1800-2100 柔剣"], "add": ["2027-01-31 0900-1200 柔剣"]},
+                   "3": {"cancel": ["2027-01-06 1800-2100"]}}}
+add, cancel = rg.planned_changes(doc, cur)
+assert add == {11: ["2027-01-31 0900-1200 柔剣"], 9: ["2027-01-31 0900-1200 柔剣"]}, add
+assert cancel == {11: ["2027-01-13 0900-1200"], 9: ["2027-01-31 1800-2100 柔剣"]}, cancel   # 無い申込の取消は飛ばす
+# 前の形(applications だけ)では取消をしない
+add, cancel = rg.planned_changes({"applications": {"11": ["2027-01-13 1800-2100", "2027-01-27 1800-2100"]}}, cur)
+assert add == {11: ["2027-01-27 1800-2100"]} and cancel == {}
+assert rg.slot_text("2027-01-17 0900-1200 柔剣") == "1/17(日)09時・柔剣道場"
+print("actions ok")
