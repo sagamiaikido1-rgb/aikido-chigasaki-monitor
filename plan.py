@@ -442,23 +442,23 @@ OPEN_MONTH_JS = """([room, label]) => {
 }"""
 
 
-def open_lottery_page(page, year, month):
-    """ログイン済みの画面から、抽選施設一覧 → 総合体育館 柔道場 の「YYYY年M月」を開き、HTMLを返す。"""
+def open_lottery_page(page, year, month, room="柔道場"):
+    """ログイン済みの画面から、抽選施設一覧 → 総合体育館 柔道場(または柔剣道場)の「YYYY年M月」を開き、HTMLを返す。"""
     lc.go_menu_item(page, "抽選施設一覧")
     page.wait_for_timeout(1500)
-    if not page.evaluate(OPEN_MONTH_JS, ["総合体育館柔道場", f"{year}年{month}月"]):
-        raise RuntimeError("抽選施設一覧で 総合体育館 柔道場 の月ボタンが見つかりません")
+    if not page.evaluate(OPEN_MONTH_JS, ["総合体育館" + room, f"{year}年{month}月"]):
+        raise RuntimeError(f"抽選施設一覧で 総合体育館 {room} の月ボタンが見つかりません")
     page.wait_for_timeout(2500)
     return lc.ca.safe_content(page)
 
 
-def read_lottery_page(browser, uid, pw, year, month):
+def read_lottery_page(browser, uid, pw, year, month, room="柔道場"):
     """抽選申込画面(月の表)のHTML。読めなければ None。"""
     ctx = browser.new_context()
     page = ctx.new_page()
     try:
         lc.login(page, uid, pw)
-        return open_lottery_page(page, year, month)
+        return open_lottery_page(page, year, month, room)
     except Exception as e:
         print(f"[抽選画面] 読み取りに失敗しました({type(e).__name__}: {str(e)[:80]})")
         return None
