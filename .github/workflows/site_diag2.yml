@@ -1,0 +1,25 @@
+name: 合気道 予約サイトの拒否範囲の診断(ログインしない)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 各サイトに1回ずつアクセスして応答を記録
+        run: |
+          echo "この実行のIP: $(curl -s -m 10 https://api.ipify.org)"
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36"
+          for u in \
+            https://k7.p-kashikan.jp/chigasaki-city/ \
+            https://k7.p-kashikan.jp/ \
+            https://k7.p-kashikan.jp/nakano-city/ \
+            https://k7.p-kashikan.jp/kurashiki-city/ \
+            https://k7.p-kashikan.jp/ashikaga-city/ \
+            https://www.city.chigasaki.kanagawa.jp/ ; do
+            echo "=== $u"
+            curl -s -m 20 -A "$UA" -o /tmp/b -D - "$u" | grep -iE "^HTTP|^server|^x-|^via|^cf-|^set-cookie: (incap|visid|ak_|bm)" || echo "(応答なし)"
+            head -c 300 /tmp/b | tr '\n' ' '; echo
+          done
