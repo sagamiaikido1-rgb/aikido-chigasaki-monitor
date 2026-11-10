@@ -4,9 +4,11 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "11 22 * * *"   # UTC22:11 = 日本時間 7:11
-    - cron: "11 10 * * *"   # UTC10:11 = 日本時間19:11(申込期間の1〜15日だけ動く。analyze.py が判定)
+  # 【一時停止中 2026-11-11】予約サイトがGitHubからのアクセスを403で拒否しているため自動実行を止めています。
+  # 再開するときは下の # を外してください。
+#  schedule:
+#    - cron: "11 22 * * *"   # UTC22:11 = 日本時間 7:11
+#    - cron: "11 10 * * *"   # UTC10:11 = 日本時間19:11(申込期間の1〜15日だけ動く。analyze.py が判定)
   workflow_dispatch:
     inputs:
       month:
