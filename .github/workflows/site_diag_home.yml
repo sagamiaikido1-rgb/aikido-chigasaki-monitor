@@ -16,8 +16,8 @@ jobs:
       PYTHONUTF8: "1"
     steps:
       - name: Git付属の bash を使えるようにする(サービスの PATH に入らないため)
-        shell: powershell
-        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
+        shell: cmd
+        run: echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
       - uses: actions/checkout@v4
       - name: 予約サイトの入口(1回だけ)
         run: |
