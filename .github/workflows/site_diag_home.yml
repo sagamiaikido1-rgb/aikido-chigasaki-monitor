@@ -37,6 +37,8 @@ jobs:
             (cd "$T" && /c/Windows/System32/tar.exe -xf uv.zip && rm -f uv.zip)
           fi
           export UV_PYTHON_INSTALL_DIR="C:\actions-runner\tools\python"
+          export UV_PYTHON_PREFERENCE=only-managed
+          "$T/uv.exe" python install 3.11
           [ -x "$T/venv/Scripts/python.exe" ] || "$T/uv.exe" venv --seed --python 3.11 "C:\actions-runner\tools\venv"
           echo "C:\actions-runner\tools\venv\Scripts" >> "$GITHUB_PATH"
       - name: Python と Git の確認
