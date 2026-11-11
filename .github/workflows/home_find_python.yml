@@ -1,0 +1,27 @@
+name: 合気道 自宅パソコンの Python の場所を探す
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 10
+    steps:
+      - name: Python の場所を探す
+        shell: cmd
+        run: |
+          echo --- Program Files
+          where /r "C:\Program Files" python.exe 2>nul
+          echo --- Program Files x86
+          where /r "C:\Program Files (x86)" python.exe 2>nul
+          echo --- C:\ 直下
+          dir /b C:\ | findstr /i python
+          echo --- ユーザーのフォルダ
+          where /r "C:\Users\ko_oh\AppData\Local\Programs" python.exe 2>nul
+          echo --- レジストリ(全体)
+          reg query HKLM\SOFTWARE\Python\PythonCore /s /v ExecutablePath 2>nul
+          echo --- py ランチャー
+          where py 2>nul
+          dir C:\Windows\py.exe 2>nul
+          exit /b 0
