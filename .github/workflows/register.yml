@@ -26,9 +26,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  register:
+  # 確定の確認は予約サイトに入らないので、これまで通り GitHub 上で動かす(パソコンの電源が切れていても溜まらない)
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+      month: ${{ steps.check.outputs.month }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,19 +46,31 @@ jobs:
           REGISTER_MONTH: ${{ github.event.inputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
         run: python register.py check
-      - if: steps.check.outputs.run == '1'
-        name: 予約サイトに入れるか先に確認(403なら、ここで止める)
+
+  # 確定があったときだけ、自宅のWindowsパソコンで予約サイトに登録する(2026-11 GitHubからは403で拒否されるため)
+  register:
+    needs: check
+    if: needs.check.outputs.run == '1'
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
         run: |
           code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
           echo "予約サイトの応答: $code"
-          if [ "$code" = "403" ]; then
-            echo "::error::予約サイトがGitHubからのアクセスを拒否しています(403)。ログインせずに中止しました。"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
             exit 1
           fi
-      - if: steps.check.outputs.run == '1'
-        run: pip install -r requirements.txt && playwright install --with-deps chromium
       - name: 登録(代表の確定を受けて申込・取消)
-        if: steps.check.outputs.run == '1'
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
@@ -64,7 +80,7 @@ jobs:
           AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
           FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
-          REGISTER_MONTH: ${{ steps.check.outputs.month }}
+          REGISTER_MONTH: ${{ needs.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
           REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}   # 11/1の不具合のため一時的に確認のみに戻す
           TEST_ID: ${{ github.event.inputs.test_id }}

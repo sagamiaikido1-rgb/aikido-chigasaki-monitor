@@ -4,11 +4,10 @@ permissions:
   contents: write
 
 on:
-  # 【一時停止中 2026-11-11】予約サイトがGitHubからのアクセスを403で拒否しているため自動実行を止めています。
-  # 再開するときは下の # を外してください。
-#  schedule:
-#    - cron: "41 10 1-15 * *"   # UTC10:41 = 日本時間19:41、毎月1〜15日
-#    - cron: "41 1 15 * *"      # 15日だけ昼にも(UTC1:41 = 日本時間10:41)。締切前に判断の時間を残すため
+  # 2026-11 から自宅のWindowsパソコンで動かす。電源が切れているときは、次に電源を入れたときに動く(24時間以内)
+  schedule:
+    - cron: "41 11 1-15 * *"   # UTC11:41 = 日本時間20:41、毎月1〜15日(抽選分析の後)
+    - cron: "41 1 15 * *"      # 15日だけ昼にも(UTC1:41 = 日本時間10:41)。締切前に判断の時間を残すため
   workflow_dispatch:
     inputs:
       month:
@@ -32,22 +31,25 @@ on:
 
 jobs:
   revise:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]   # 自宅のWindowsパソコンで動かす(予約サイトがGitHubからのアクセスを拒否するため 2026-11)
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
     steps:
-      - name: 予約サイトに入れるか先に確認(403なら、ここで止める)
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
         run: |
           code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
           echo "予約サイトの応答: $code"
-          if [ "$code" = "403" ]; then
-            echo "::error::予約サイトがGitHubからのアクセスを拒否しています(403)。ログインせずに中止しました。"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
             exit 1
           fi
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-      - run: pip install -r requirements.txt && playwright install --with-deps chromium
       - name: 件数を読んで修正案をつくる(申込・取消はしない)
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}

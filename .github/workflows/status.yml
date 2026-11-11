@@ -12,22 +12,25 @@ on:
 
 jobs:
   status:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]   # 自宅のWindowsパソコンで動かす(予約サイトがGitHubからのアクセスを拒否するため 2026-11)
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
     steps:
-      - name: 予約サイトに入れるか先に確認(403なら、ここで止める)
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
         run: |
           code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
           echo "予約サイトの応答: $code"
-          if [ "$code" = "403" ]; then
-            echo "::error::予約サイトがGitHubからのアクセスを拒否しています(403)。ログインせずに中止しました。"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
             exit 1
           fi
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-      - run: pip install -r requirements.txt && playwright install --with-deps chromium
       - name: 全IDの抽選申込一覧を読む(読み取りのみ)
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}

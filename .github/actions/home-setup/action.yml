@@ -1,0 +1,28 @@
+name: 自宅パソコンの準備
+description: 自宅のWindowsパソコン(self-hosted)で、bash・Python・Playwright を使えるようにする。パソコン本体には入れず C:\actions-runner\tools の中だけに置く。
+runs:
+  using: composite
+  steps:
+    - name: Git付属の bash を使えるようにする
+      shell: cmd
+      run: echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+    - name: Python を用意する
+      shell: cmd
+      run: |
+        set T=C:\actions-runner\tools
+        if not exist "%T%" mkdir "%T%"
+        if not exist "%T%\uv.exe" (
+          curl -sSL -o "%T%\uv.zip" https://github.com/astral-sh/uv/releases/download/0.9.5/uv-x86_64-pc-windows-msvc.zip || exit /b 1
+          C:\Windows\System32\tar.exe -xf "%T%\uv.zip" -C "%T%" || exit /b 1
+          del "%T%\uv.zip"
+        )
+        set UV_PYTHON_INSTALL_DIR=%T%\python
+        set UV_PYTHON_PREFERENCE=only-managed
+        "%T%\uv.exe" python install 3.11 || exit /b 1
+        if not exist "%T%\venv\Scripts\python.exe" "%T%\uv.exe" venv --seed --python 3.11 "%T%\venv" || exit /b 1
+        echo %T%\venv\Scripts>>"%GITHUB_PATH%"
+    - name: 必要な部品を入れる
+      shell: cmd
+      run: |
+        C:\actions-runner\tools\venv\Scripts\python.exe -m pip install -q -r requirements.txt tzdata || exit /b 1
+        C:\actions-runner\tools\venv\Scripts\python.exe -m playwright install chromium || exit /b 1
