@@ -1,0 +1,34 @@
+name: 合気道 自宅パソコンの動作確認(ログインしない)
+
+# 自宅のWindowsパソコン(GitHubに「self-hosted」として登録したもの)で動かす確認用。
+# 予約サイトに1回だけアクセスし、Python・Git・Playwright が使えるかを確かめる。
+on:
+  workflow_dispatch:
+
+jobs:
+  home:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: 予約サイトの入口(1回だけ)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          echo "HTTP: $code"
+          [ "$code" = "200" ] || { echo "::error::自宅パソコンからも入れませんでした($code)"; exit 1; }
+      - name: Python と Git の確認
+        run: |
+          python --version
+          git --version
+      - name: 必要な部品を入れる
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt tzdata
+          python -m playwright install chromium
+      - name: ブラウザで予約サイトのトップを開く(ログインしない)
+        run: python site_diag.py
