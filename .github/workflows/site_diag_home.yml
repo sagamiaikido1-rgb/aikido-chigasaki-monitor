@@ -11,7 +11,8 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        shell: bash
+        # Git for Windows に付いている bash を直接使う(サービスの PATH に bash が入らないため)
+        shell: '"C:\\Program Files\\Git\\bin\\bash.exe" --noprofile --norc -eo pipefail {0}'
     env:
       PYTHONUTF8: "1"
     steps:
