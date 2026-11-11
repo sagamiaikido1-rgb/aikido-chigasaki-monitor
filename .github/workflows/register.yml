@@ -43,6 +43,15 @@ jobs:
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
         run: python register.py check
       - if: steps.check.outputs.run == '1'
+        name: 予約サイトに入れるか先に確認(403なら、ここで止める)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" = "403" ]; then
+            echo "::error::予約サイトがGitHubからのアクセスを拒否しています(403)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - if: steps.check.outputs.run == '1'
         run: pip install -r requirements.txt && playwright install --with-deps chromium
       - name: 登録(代表の確定を受けて申込・取消)
         if: steps.check.outputs.run == '1'
