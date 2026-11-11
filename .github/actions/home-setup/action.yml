@@ -13,6 +13,8 @@ runs:
         if not exist "%T%" mkdir "%T%"
         if not exist "%T%\uv.exe" (
           curl -sSL -o "%T%\uv.zip" https://github.com/astral-sh/uv/releases/download/0.9.5/uv-x86_64-pc-windows-msvc.zip || exit /b 1
+          rem 公式に発表されている SHA256 と一致するか確かめる(すり替え防止)
+          certutil -hashfile "%T%\uv.zip" SHA256 | findstr /i "515dc53d7553f1357d0abc1f70acd921fbb9e30230b1d9a08737236daa6ee920" >nul || (del "%T%\uv.zip" & echo ::error::uv のファイルが公式のものと一致しませんでした & exit /b 1)
           C:\Windows\System32\tar.exe -xf "%T%\uv.zip" -C "%T%" || exit /b 1
           del "%T%\uv.zip"
         )
