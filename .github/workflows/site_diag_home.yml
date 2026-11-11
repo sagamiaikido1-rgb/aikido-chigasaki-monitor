@@ -15,9 +15,14 @@ jobs:
     env:
       PYTHONUTF8: "1"
     steps:
-      - name: Git付属の bash を使えるようにする(サービスの PATH に入らないため)
+      - name: Git付属の bash と Python を使えるようにする(サービスの PATH に入らないため)
         shell: cmd
-        run: echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+        run: |
+          echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"
+          echo C:\Program Files\Python311>>"%GITHUB_PATH%"
+          echo C:\Program Files\Python311\Scripts>>"%GITHUB_PATH%"
+          dir "C:\Program Files" | findstr /i python
+          where py
       - uses: actions/checkout@v4
       - name: 予約サイトの入口(1回だけ)
         run: |
