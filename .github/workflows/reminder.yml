@@ -1,8 +1,10 @@
 name: 合気道 毎月1日のお知らせ
 
 on:
-  schedule:
-    - cron: 0 23 28-31 * *
+  # 【一時停止中 2026-11-11】予約サイトがGitHubからのアクセスを403で拒否しているため自動実行を止めています。
+  # 再開するときは下の # を外してください。
+#  schedule:
+#    - cron: 0 23 28-31 * *
   workflow_dispatch:
     inputs:
       force:
