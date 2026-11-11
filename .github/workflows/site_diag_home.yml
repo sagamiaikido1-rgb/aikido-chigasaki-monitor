@@ -11,11 +11,13 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        # Git for Windows に付いている bash を直接使う(サービスの PATH に bash が入らないため)
-        shell: '"C:\\Program Files\\Git\\bin\\bash.exe" --noprofile --norc -eo pipefail {0}'
+        shell: bash
     env:
       PYTHONUTF8: "1"
     steps:
+      - name: Git付属の bash を使えるようにする(サービスの PATH に入らないため)
+        shell: powershell
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\Git\bin"
       - uses: actions/checkout@v4
       - name: 予約サイトの入口(1回だけ)
         run: |
