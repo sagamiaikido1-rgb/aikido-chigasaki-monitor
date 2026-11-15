@@ -51,12 +51,17 @@ def is_judo(text):
     return "総合体育館" in text and "柔道場" in text and "柔剣道場" not in text
 
 
-def current_assignment(accounts_rows, year, month):
-    """全IDの抽選申込一覧 → {(date, start, end): [ID番号]}(抽選待ちの柔道場のみ)"""
+def is_kenken(text):
+    return "総合体育館" in text and "柔剣道場" in text
+
+
+def current_assignment(accounts_rows, year, month, room_check=None):
+    """全IDの抽選申込一覧 → {(date, start, end): [ID番号]}(抽選待ちの柔道場のみ。room_check で部屋を変えられる)"""
+    room_check = room_check or is_judo
     cur = defaultdict(list)
     for idx, rows in accounts_rows:
         for r in rows:
-            if (r["year"], r["month"]) != (year, month) or not is_judo(r["text"]):
+            if (r["year"], r["month"]) != (year, month) or not room_check(r["text"]):
                 continue
             if "抽選待ち" not in r["status"] and "抽選中" not in r["status"] and "受付" not in r["status"]:
                 continue
@@ -64,29 +69,39 @@ def current_assignment(accounts_rows, year, month):
     return cur
 
 
-def expected(assign, others, weights):
-    return sum(plan.p_secure(sum(weights.get(i, 1.0) for i in ids), max(others[k], MIN_OTHERS))
+def expected(assign, others, weights, fixed=None):
+    """fixed: {枠: [ID]} 柔剣道場など、動かさないがこちらの申込として数える分"""
+    fixed = fixed or {}
+    return sum(plan.p_secure(sum(weights.get(i, 1.0) for i in list(ids) + list(fixed.get(k, []))),
+                             max(others[k], MIN_OTHERS))
                for k, ids in assign.items())
 
 
-def improve(assign, others, ids, cap, weights, min_gain=MIN_GAIN, max_moves=MAX_MOVES):
-    """今の申込から、見込みが一番上がる1手(移す/足す)を順に選ぶ。→ (新しい割り振り, 手のリスト)"""
+def improve(assign, others, ids, cap, weights, min_gain=MIN_GAIN, max_moves=MAX_MOVES, fixed=None):
+    """今の申込から、見込みが一番上がる1手(移す/足す)を順に選ぶ。→ (新しい割り振り, 手のリスト)
+    fixed(柔剣道場の申込)は動かさないが、見込みと1IDの上限には数える。"""
     assign = {k: list(v) for k, v in assign.items()}
+    fixed = fixed or {}
     w = lambda i: weights.get(i, 1.0)  # noqa: E731
 
     def p(k, extra=0.0):
-        return plan.p_secure(sum(w(i) for i in assign[k]) + extra, max(others[k], MIN_OTHERS))
+        return plan.p_secure(sum(w(i) for i in assign[k] + list(fixed.get(k, []))) + extra,
+                             max(others[k], MIN_OTHERS))
 
+    fixed_used = defaultdict(int)
+    for lst in fixed.values():
+        for i in lst:
+            fixed_used[i] += 1
     moves = []
     for _ in range(max_moves):
-        used = defaultdict(int)
+        used = defaultdict(int, fixed_used)
         for k, lst in assign.items():
             for i in lst:
                 used[i] += 1
         best = None
         for i in ids:
             for b in assign:
-                if i in assign[b]:
+                if i in assign[b] or i in fixed.get(b, []):
                     continue
                 gain_add = p(b, w(i)) - p(b)
                 if used[i] < cap:  # 上限に空きがあれば足す
@@ -148,12 +163,16 @@ def main():
 
     accounts = lc.load_accounts()
     print(f"対象: {year}年{month}月 / ID数: {len(accounts)}")
-    accounts_rows, failed, html = [], [], None
+    accounts_rows, failed, html, html_kk = [], [], None, None
     with sync_playwright() as p:
         browser = p.chromium.launch()
         for (i, uid, pw) in accounts:
             if html is None:
                 html = plan.read_lottery_page(browser, uid, pw, year, month)
+                try:
+                    html_kk = plan.read_lottery_page(browser, uid, pw, year, month, "柔剣道場")
+                except Exception as e:
+                    print(f"[注意] 柔剣道場の抽選申込画面を読めませんでした({type(e).__name__})")
             if i > 1:
                 time.sleep(3)
             try:
@@ -168,6 +187,8 @@ def main():
         sys.exit(1)
 
     counts = parse_lottery_counts(html)
+    # 柔道場の「抽選(n)」= 柔道場＋柔剣道場、柔剣道場の「抽選(n)」= その時間帯の全部 → 大きい方を総数にする
+    counts_kk = parse_lottery_counts(html_kk) if html_kk else {}
     closed = plan.parse_closed_days(html, year)
     cands = [(s[0], s[1], s[2]) for s in plan.candidate_slots(year, month) if s[0] not in closed]
     if counts:
@@ -179,28 +200,34 @@ def main():
     if not counts:
         print("[エラー] 「抽選(n)」の件数が1つも読み取れませんでした(画面の形式が変わった可能性)")
         sys.exit(1)
+    total = {k: max(counts.get(k, 0), counts_kk.get(k, 0)) for k in set(counts) | set(counts_kk)}
     cur = current_assignment(accounts_rows, year, month)
+    cur_kk = current_assignment(accounts_rows, year, month, is_kenken)
     assign = {k: list(cur.get(k, [])) for k in cands}
-    others = {k: max(counts.get(k, 0) - len(assign[k]), 0) for k in cands}
-    outside = {k: v for k, v in cur.items() if k not in assign}  # 候補外の申込(日曜夜など)はそのまま
+    fixed = {k: list(cur_kk.get(k, [])) for k in cands if cur_kk.get(k)}
+    ours_n = lambda k: len(assign[k]) + len(fixed.get(k, []))  # noqa: E731
+    others = {k: max(total.get(k, 0) - ours_n(k), 0) for k in cands}
+    outside = {k: v for k, v in cur.items() if k not in assign}
+    outside.update({k: v for k, v in cur_kk.items() if k not in assign})  # 候補外の申込(日曜夜など)はそのまま
 
     cap = plan.cap_for((year, month), closed, os.environ.get("PLAN_CAP", ""))
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
-    before = expected(assign, others, weights)
-    new_assign, moves = improve(assign, others, ids, cap, weights)
-    after = expected(new_assign, others, weights)
+    before = expected(assign, others, weights, fixed)
+    new_assign, moves = improve(assign, others, ids, cap, weights, fixed=fixed)
+    after = expected(new_assign, others, weights, fixed)
 
     for k in cands:
-        print(f"[件数] {key_label(k)} 総数{counts.get(k, 0)} こちら{len(assign[k])} 他団体{others[k]}")
+        print(f"[件数] {key_label(k)} 総数{total.get(k, 0)} こちら{ours_n(k)}(柔剣{len(fixed.get(k, []))}) 他団体{others[k]}")
     print(f"見込み: 今 {before:.2f} → 修正後 {after:.2f} / {len(cands)}日  修正 {len(moves)}件")
 
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
     who = lambda i: lc.who_label(i, names.get(i, ""))  # noqa: E731
-    lines = [f"{year}年{month}月分 抽選申込の状況({today.month}/{today.day} 時点・総合体育館 柔道場)", ""]
+    lines = [f"{year}年{month}月分 抽選申込の状況({today.month}/{today.day} 時点・総合体育館 柔道場＋柔剣道場)", ""]
     lines.append("■ 日ごとの申込件数")
     for k in cands:
-        pr = plan.p_secure(sum(weights.get(i, 1.0) for i in assign[k]), max(others[k], MIN_OTHERS))
-        lines.append(f"  {key_label(k)}  総数{counts.get(k, 0)}  こちら{len(assign[k])}  他団体{others[k]}  見込み{pr:.0%}")
+        pr = plan.p_secure(sum(weights.get(i, 1.0) for i in assign[k] + fixed.get(k, [])), max(others[k], MIN_OTHERS))
+        kk = f"(うち柔剣道場{len(fixed[k])})" if fixed.get(k) else ""
+        lines.append(f"  {key_label(k)}  総数{total.get(k, 0)}  こちら{ours_n(k)}{kk}  他団体{others[k]}  見込み{pr:.0%}")
     lines.append("")
     lines.append(f"■ 確保できる日数の見込み: 今 {before:.1f}日 → 修正後 {after:.1f}日(全{len(cands)}日)")
     lines.append("")
@@ -233,7 +260,7 @@ def main():
     data = {
         "year": year, "month": month, "checked_at": datetime.now(plan.JST).strftime("%Y-%m-%d %H:%M"),
         "expected_before": round(before, 2), "expected_after": round(after, 2),
-        "counts": {f"{k[0].isoformat()} {k[1]}-{k[2]}": {"total": counts.get(k, 0), "ours": len(assign[k]),
+        "counts": {f"{k[0].isoformat()} {k[1]}-{k[2]}": {"total": total.get(k, 0), "ours": ours_n(k),
                                                          "others": others[k]} for k in cands},
         "moves": [{"kind": mv["kind"], "id": mv["id"],
                    "from": f"{mv['from'][0].isoformat()} {mv['from'][1]}-{mv['from'][2]}" if mv["from"] else None,
