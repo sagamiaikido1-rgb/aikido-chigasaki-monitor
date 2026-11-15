@@ -249,6 +249,16 @@ def main():
     if failed:
         lines.append("※ 読み取れなかったID(計算から除外): " + "、".join(who(i) for i in failed))
     lines += ["", f"※ 締切は {month - 2 if month > 2 else month + 10}月15日 23:59 です。件数は毎日変わるので、14日・15日には状況のお知らせが届きます。"]
+    # 訂正・お知らせ: 手動実行の note 入力、または plan/mail_note_YYYY-MM-DD.txt(その日だけ)を本文の先頭に付ける
+    note = os.environ.get("MAIL_NOTE", "").strip()
+    if not note:
+        try:
+            with open(f"plan/mail_note_{today.isoformat()}.txt", encoding="utf-8") as f:
+                note = f.read().strip()
+        except OSError:
+            note = ""
+    if note:
+        lines = [note, "", "─" * 20, ""] + lines
     body = "\n".join(lines)
 
     os.makedirs("plan", exist_ok=True)
@@ -275,7 +285,8 @@ def main():
     if not notify:
         print("修正案は前回と同じため、メールは送りません(管理画面には表示されます)")
     elif os.environ.get("SEND_MAIL", "1") == "1":
-        subject = f"【合気道】{month}月分 抽選 " + (f"修正案{len(moves)}件" if moves else "修正不要") + f"({today.month}/{today.day}・{why})"
+        subject = (("【訂正】" if note else "") + f"【合気道】{month}月分 抽選 "
+                   + (f"修正案{len(moves)}件" if moves else "修正不要") + f"({today.month}/{today.day}・{why})")
         lc.ca.send_mail(subject, body)
         print("メールを送信しました。")
 

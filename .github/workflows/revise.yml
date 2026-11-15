@@ -28,6 +28,9 @@ on:
       send_mail:
         description: 1=メールで送る 0=送らない(テスト)
         default: "1"
+      note:
+        description: メール本文の先頭に付けるお知らせ・訂正(空欄なら付けない)
+        default: ""
 
 jobs:
   revise:
@@ -64,6 +67,7 @@ jobs:
           NEW_WEIGHT: ${{ github.event.inputs.new_weight || '1.5' }}
           FORCE: ${{ github.event.inputs.force || '0' }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+          MAIL_NOTE: ${{ github.event.inputs.note }}
         run: python revise.py
       - name: 修正案(ID番号と日付のみ)を保存
         if: success()
