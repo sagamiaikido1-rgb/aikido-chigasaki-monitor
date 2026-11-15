@@ -1,9 +1,9 @@
 {
  "year": 2027,
  "month": 1,
- "checked_at": "2026-11-15 18:49",
- "expected_before": 5.52,
- "expected_after": 5.52,
+ "checked_at": "2026-11-15 21:42",
+ "expected_before": 5.37,
+ "expected_after": 5.37,
  "counts": {
   "2027-01-06 1800-2100": {
    "total": 9,
@@ -16,9 +16,9 @@
    "others": 0
   },
   "2027-01-17 0900-1200": {
-   "total": 11,
+   "total": 12,
    "ours": 9,
-   "others": 2
+   "others": 3
   },
   "2027-01-20 1800-2100": {
    "total": 9,
@@ -31,9 +31,9 @@
    "others": 1
   },
   "2027-01-31 0900-1200": {
-   "total": 10,
+   "total": 11,
    "ours": 9,
-   "others": 1
+   "others": 2
   }
  },
  "moves": [],
