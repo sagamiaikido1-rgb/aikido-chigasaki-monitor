@@ -1,0 +1,22 @@
+name: 自宅パソコン用スケジューラのテスト
+
+# pc/ の中身を変えたときに、GitHub のクラウド(Linux)で時刻判断のテストをする。自宅パソコンは使わない
+on:
+  push:
+    paths:
+      - "pc/**"
+      - ".github/workflows/pc_test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: テスト
+        shell: pwsh
+        run: ./pc/test_scheduler.ps1
