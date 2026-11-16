@@ -257,17 +257,53 @@ def list_text(page) -> str:
     return ""
 
 
+TOTAL_RE = re.compile(r"(\d+)\s*件\s*うち")
+
+
+def total_count(text: str):
+    """画面の「27 件 うち 1 - 10 件目」から全体の件数を読む。読めなければ None。"""
+    m = TOTAL_RE.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def _next_page(page, n) -> bool:
+    """次のページへ進む。ページ番号のボタン(画面の文字が n)か「>」ボタンを押す。"""
+    tries = [
+        page.locator(".v-pagination__item, .v-pagination li, nav li, [class*=pagination] li")
+            .get_by_text(str(n), exact=True),
+        page.locator("button, a").filter(has_text=re.compile(rf"^\s*{n}\s*$")),
+        page.locator(".v-pagination__next button, .v-pagination__next, "
+                     "button[aria-label*='次'], button[aria-label*='Next' i], a[aria-label*='次']"),
+    ]
+    for loc in tries:
+        try:
+            if not _visible(loc):
+                continue
+            el = loc.first
+            if el.get_attribute("disabled") is not None or el.get_attribute("aria-disabled") == "true":
+                continue
+            el.click(timeout=8000)
+            page.wait_for_timeout(2500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def read_all_pages(page, max_pages=15):
     cards, seen = [], set()
+    total = None
     for n in range(1, max_pages + 1):
         if n > 1:
-            btn = page.get_by_role("button", name=str(n), exact=True)
-            if not _visible(btn):
+            if total is not None and len(cards) >= total:
                 break
-            btn.first.click(timeout=8000)
-            page.wait_for_timeout(2500)
+            if not _next_page(page, n):
+                break
+        text = list_text(page)
+        if total is None:
+            total = total_count(text)
         new = 0
-        for c in parse_cards(list_text(page)):
+        for c in parse_cards(text):
             k = (c["no"], c["year"], c["month"], c["day"], c["start"], c["facility"], c["status"])
             if k in seen:
                 continue
@@ -276,6 +312,9 @@ def read_all_pages(page, max_pages=15):
             new += 1
         if n > 1 and new == 0:
             break
+    if total is not None and len(cards) < total:
+        print(f"[注意] 画面の件数 {total}件のうち {len(cards)}件しか読めませんでした(ページ送りを確認)")
+        show_labels(page)
     return cards
 
 

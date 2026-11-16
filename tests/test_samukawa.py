@@ -56,4 +56,5 @@ acc = sk.load_accounts({"SAMUKAWA_ACCOUNTS": "11111111 pw1\n22222222,pw2\n333333
 assert acc == [(1, "11111111", "pw1"), (2, "22222222", "pw2")], acc
 
 assert sk.target_month(datetime(2026, 11, 15).date()) == (2027, 1)
+assert sk.total_count(A1) == 27 and sk.total_count("なし") is None
 print("ok")
