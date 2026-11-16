@@ -5,8 +5,9 @@ permissions:
 
 on:
   # 2026-11 から自宅のWindowsパソコンで動かす。電源が切れているときは、次に電源を入れたときに動く(24時間以内)
-  schedule:
-    - cron: "11 11 * * *"   # UTC11:11 = 日本時間20:11(申込期間の1〜15日だけ動く。analyze.py が判定)。アクセスを減らすため1日1回
+  # 決まった時刻の実行は、自宅パソコンの「AikidoScheduler」(pc/aikido_scheduler.ps1)が頼む。
+  # GitHub の時刻実行は何時間も遅れたり捨てられたりするため使わない。以前の設定:
+  #   - cron: "11 11 * * *"   # UTC11:11 = 日本時間20:11(申込期間の1〜15日だけ動く。analyze.py が判定)。アクセスを減らすため1日1回
   workflow_dispatch:
     inputs:
       month:
