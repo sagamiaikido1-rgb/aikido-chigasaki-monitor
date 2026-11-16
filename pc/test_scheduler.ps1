@@ -3,9 +3,11 @@ $ErrorActionPreference = 'Stop'
 $src = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot 'aikido_scheduler.ps1')
 
 # 外とのやりとりを偽物に置き換える
-$src = $src -replace 'function Get-JstNow \{[^}]*\}', 'function Get-JstNow { $global:FakeNow }'
-$src = $src -replace "function Read-Token \{(?s).*?\n\}", 'function Read-Token { "x" }'
-$src = $src -replace 'function Invoke-Dispatch\(\$token, \$job\) \{(?s).*?\n\}', 'function Invoke-Dispatch($token, $job) { $global:Calls += ,("{0}|{1}" -f $job.Wf, (($job.Inputs.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ",")); return 204 }'
+# 置き換え後の文字に $ が入るため、文字どおりに置き換える(-replace の置換文字では $_ が特別な意味になる)
+function Swap([string]$text, [string]$pattern, [string]$with) { [regex]::Replace($text, $pattern, ({ param($m) $with }.GetNewClosure())) }
+$src = Swap $src 'function Get-JstNow \{[^}]*\}' 'function Get-JstNow { $global:FakeNow }'
+$src = Swap $src '(?s)function Read-Token \{.*?\n\}' 'function Read-Token { "x" }'
+$src = Swap $src '(?s)function Invoke-Dispatch\(\$token, \$job\) \{.*?\n\}' 'function Invoke-Dispatch($token, $job) { $global:Calls += ,("{0}|{1}" -f $job.Wf, (($job.Inputs.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ",")); return 204 }'
 $src = $src -replace 'Start-Sleep -Seconds 5', ''
 if ($src -match 'api\.github\.com') { throw '置き換えに失敗しました(本物の GitHub に頼む部分が残っています)' }
 $block = [scriptblock]::Create($src)
