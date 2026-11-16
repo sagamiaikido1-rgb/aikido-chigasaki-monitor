@@ -1,0 +1,59 @@
+name: 合気道 平塚 抽選・予約まとめ
+
+# 平塚市公共施設予約システムの「予約申込内容」「抽選申込内容」を全ID(Secrets の HIRATSUKA_ACCOUNTS)で読み、
+# 管理画面の「🎯 抽選取込」(平塚)が読むファイル summary/hiratsuka/ を保存する。読むだけで、申込・取消・支払いはしない。
+# 抽選は利用月の前月1日、結果は2日から。10日までに支払わないと予約が消えるため、2日と11日に動かす(自宅のWindowsパソコン)
+on:
+  schedule:
+    - cron: "17 22 1,10 * *"   # UTC1日・10日22:17 = 日本時間2日・11日7:17
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 集計する月(例 2027-01)。空欄なら翌月を自動で選ぶ
+        default: ""
+      send_mail:
+        description: 1=結果をメールでも送る 0=ログだけ
+        default: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  hiratsuka:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://shisetsu.city.hiratsuka.kanagawa.jp/cultos/reserve/gin_menu || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::平塚の予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: 集計
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          HIRATSUKA_ACCOUNTS: ${{ secrets.HIRATSUKA_ACCOUNTS }}
+          SUMMARY_MONTH: ${{ github.event.inputs.month }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python hiratsuka.py
+      - name: 取込用ファイルを保存(管理画面の抽選取込タブが読み込む)
+        if: always()
+        run: |
+          ls summary/hiratsuka/*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add summary/hiratsuka/*.json
+          git commit -m "平塚の抽選・予約まとめ(取込用)を保存" || exit 0
+          git pull --rebase && git push

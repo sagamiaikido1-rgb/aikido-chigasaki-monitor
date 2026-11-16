@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-合気道:寒川道場(寒川総合体育館 武道場畳・土曜12:00-15:00)の抽選結果を、全IDぶん集計する。
+合気道:寒川道場(寒川総合体育館 武道場畳・土曜)の抽選結果を、全IDぶん集計する。
 
 寒川町 e-kanagawa 施設予約サービス(https://s-yoyaku.e-kanagawa.lg.jp/samukawa )の
 「申込状況」→「抽選」タブを、登録した全ID(Secrets の SAMUKAWA_ACCOUNTS)で読み、
@@ -35,7 +35,7 @@ OUT_DIR = "summary/samukawa"
 # 「武道場畳」「武道場床＋畳」のどちらでも畳を使えるため、「畳」で判定する
 TARGET_WORDS = ("武道場", "畳")
 TARGET_WEEKDAY = "土"
-TARGET_START = "12:00"
+TARGET_STARTS = ("12:00", "15:00", "18:00")  # 昼・夕・夜(ふだんは昼。状況により夕・夜もある)
 
 
 class LoginFailed(Exception):
@@ -84,7 +84,7 @@ def parse_cards(text: str):
 def is_target(c) -> bool:
     fac = c["facility"].replace(" ", "")
     return (all(w in fac for w in TARGET_WORDS)
-            and c["weekday"] == TARGET_WEEKDAY and c["start"] == TARGET_START)
+            and c["weekday"] == TARGET_WEEKDAY and c["start"] in TARGET_STARTS)
 
 
 def classify(status: str) -> str:
@@ -136,7 +136,7 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
 def build_report(data, who_failed=""):
     wd = lambda s: "月火水木金土日"[date.fromisoformat(s["date"]).weekday()]  # noqa: E731
     fmt = lambda s: f"  {s['date']}({wd(s)}) {s['start']}-{s['end']}"  # noqa: E731
-    lines = [f"寒川 {data['year']}年{data['month']}月 抽選結果のまとめ(武道場畳・土曜12:00-15:00)", ""]
+    lines = [f"寒川 {data['year']}年{data['month']}月 抽選結果のまとめ(武道場畳・土曜)", ""]
     lines.append(f"■ 確保済み(当選) {len(data['secured'])}枠")
     lines += [fmt(s) + f"  {s['facility']}" for s in data["secured"]]
     lines += ["", f"■ 全IDで落選 {len(data['lost'])}枠"]
@@ -401,7 +401,7 @@ def main():
                 names[i] = name
                 accounts_cards.append((i, cards))
                 hit = [c for c in cards if (c["year"], c["month"]) == (year, month) and is_target(c)]
-                print(f"[ID{i}] 抽選申込 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜昼 {len(hit)}件)")
+                print(f"[ID{i}] 抽選申込 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜 {len(hit)}件)")
             except LoginFailed:
                 failed.append(i)
                 print(f"[エラー] ID{i} でログインできませんでした。利用者番号とパスワードを確かめてください(再試行はしません)")
