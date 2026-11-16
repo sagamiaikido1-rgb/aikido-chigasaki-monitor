@@ -1,0 +1,59 @@
+name: 合気道 寒川 抽選結果まとめ
+
+# 寒川町 e-kanagawa の「申込状況」→「抽選」を全ID(Secrets の SAMUKAWA_ACCOUNTS)で読み、
+# 管理画面の「🎯 抽選取込」(寒川)が読むファイル summary/samukawa/ を保存する。読むだけで、申込・取消はしない。
+# 当落発表は毎月15日の朝5時。自宅のWindowsパソコンで動かす(電源が切れているときは、次に電源を入れたときに動く)
+on:
+  schedule:
+    - cron: "17 22 14 * *"   # UTC14日22:17 = 日本時間15日7:17
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 集計する月(例 2027-01)。空欄なら2か月先を自動で選ぶ
+        default: ""
+      send_mail:
+        description: 1=結果をメールでも送る 0=ログだけ
+        default: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  samukawa:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://s-yoyaku.e-kanagawa.lg.jp/samukawa || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::寒川の予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: 集計
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          SAMUKAWA_ACCOUNTS: ${{ secrets.SAMUKAWA_ACCOUNTS }}
+          SUMMARY_MONTH: ${{ github.event.inputs.month }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python samukawa.py
+      - name: 取込用ファイルを保存(管理画面の抽選取込タブが読み込む)
+        if: always()
+        run: |
+          ls summary/samukawa/*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add summary/samukawa/*.json
+          git commit -m "寒川の抽選結果まとめ(取込用)を保存" || exit 0
+          git pull --rebase && git push
