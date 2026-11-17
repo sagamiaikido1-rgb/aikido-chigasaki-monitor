@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: 予約サイトの入口(1回だけ)
         run: |
-          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          code=$(curl -s -L -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
           echo "HTTP: $code"
           [ "$code" = "200" ] || { echo "::error::自宅パソコンからも入れませんでした($code)"; exit 1; }
       - name: Python を用意する(パソコン本体には入れず、C:\actions-runner\tools の中だけに置く)
