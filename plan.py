@@ -7,19 +7,28 @@
      (毎月18日の抽選結果が出たあと〜月末に作る。翌月1日に登録、15日まで競合を見て修正)
   2. 枠ごとに「こちらが何件申し込んで、確保できたか」から、他団体の申込の多さ(推定競合)を見積もる
      (日曜朝・水曜夜で別々に見積もる)
+  2b. 申込期間の最後に保存した分析(plan/analysis/、締切時点の他団体の実数)を月ごとに積み上げて読み、
+      柔道場を争う他団体・剣道場だけを希望する他団体の数を出す(2027年1月分から記録あり)
+      → 推定競合は「当落からの推測」と「実数の平均」の大きい方(控えめに見る)
   3. 次の抽選月の全候補日(日曜 9-12時・水曜 18-21時)に、
-     「全部の日を確保できる見込み」が最大になるよう、各IDの申込(上限=その月の週の数)を割り振る
-  4. 申込案・日別の見込み・過去実績・代表の調整欄をExcelにして、メールで送る
+     「全部の日を確保できる見込み」が最大になるよう、各IDの申込(上限=総合体育館で4件)を割り振る
+     1枠は SLOT_MAX 件まで、見込みが TARGET_P に届いたらその枠にはもう足さない(72件を使い切らない)
+  3b. 日曜朝は、過去の申込の柔剣道場の割合から「うち柔剣道場○件」を提案する(登録は今までどおり柔道場のみ)
+  4. 申込案・日別の見込み・過去実績・柔剣道場の検討・代表の調整欄をExcelにして、メールで送る
 
 代表のノウハウの反映(Actions の入力欄で指定)
   - 新規ID(例 3,7) : 当選しやすいとされるID。重み(NEW_WEIGHT)を付け、取りにくい日へ優先して回す
   - 使わないID(例 5): 申込案から外す
-  - 上限            : 1IDあたりの申込数。空欄なら「候補日を含む週の数」
+  - 上限            : 1IDあたりの申込数。空欄なら4件(総合体育館で1IDあたり4件)
+  - 1枠の上限(SLOT_MAX): 1枠に当方が申し込む最大件数(目安9件)
+  - 目標の見込み(TARGET_P): 1枠の確保の見込みがここに届いたら、その枠にはもう足さない
 
 ログには ID・パスワード・団体名は出さない(公開リポジトリのため)。団体名はメールのExcelにだけ書く。
 """
 
+import glob
 import io
+import json
 import math
 import os
 import re
@@ -46,6 +55,10 @@ TARGETS = [
 DEFAULT_COMPETITORS = 3.0   # 実績が無いときの推定競合(他団体の申込件数)
 MIN_COMPETITORS = 0.5       # 実績で全部確保できていても、ここより低くは見積もらない
 HISTORY_MONTHS = 6
+SLOT_MAX = 9                # 1枠に当方が申し込む最大件数(代表の目安 9件)
+TARGET_P = 0.9              # 1枠の確保の見込みがここに届いたら、その枠にはもう足さない
+ANALYSIS_DIR = "plan/analysis"
+SUMMARY_DIR = "summary"
 
 
 # ---------------------------------------------------------------- 月の計算
@@ -174,16 +187,129 @@ def estimate_competitors(slot_stats):
     return out
 
 
+# ---------------------------------------------------------------- 積み上げた実数(締切時点の分析)
+
+def final_snapshots(base=ANALYSIS_DIR):
+    """月ごとに、申込期間(2か月前の1〜15日)のうち最後に保存した分析を選ぶ → {(年, 月): 分析データ}"""
+    best = {}
+    for path in glob.glob(os.path.join(base, "*.json")):
+        m = re.match(r"(\d{4})-(\d{2})_(\d{8})-(\d{4})\.json$", os.path.basename(path))
+        if not m:
+            continue
+        ym = (int(m.group(1)), int(m.group(2)))
+        d = datetime.strptime(m.group(3), "%Y%m%d").date()
+        if (d.year, d.month) != add_months(ym[0], ym[1], -2) or d.day > 15:
+            continue
+        ts = m.group(3) + m.group(4)
+        if ym not in best or ts > best[ym][0]:
+            best[ym] = (ts, path)
+    out = {}
+    for ym, (_ts, path) in sorted(best.items()):
+        try:
+            with open(path, encoding="utf-8") as f:
+                out[ym] = json.load(f)
+        except Exception:
+            pass
+    return out
+
+
+def load_results(ym, base=SUMMARY_DIR):
+    """抽選結果まとめ(summary/summary_YYYY-MM.json) → {(日付, 開始): "柔道場"/"柔剣道場"/"落選"}"""
+    try:
+        with open(os.path.join(base, f"summary_{ym[0]}-{ym[1]:02d}.json"), encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return {}
+    out = {}
+    for x in d.get("secured", []):
+        out[(x["date"], x["start"].replace(":", ""))] = "柔剣道場" if "柔剣道場" in x.get("facility", "") else "柔道場"
+    for x in d.get("lost", []):
+        out[(x["date"], x["start"].replace(":", ""))] = "落選"
+    return out
+
+
+def snapshot_stats(snaps, results_of=load_results):
+    """締切時点の実数を種別ごとに集める。
+    柔道場の「抽選(n)」= 柔道場＋柔剣道場への申込 → n − 当方 = 柔道場を争う他団体
+    柔剣道場の「抽選(n)」= その時間帯の全部 → 柔剣道場の n − 柔道場の n = 剣道場だけを希望する他団体
+    → (種別ごと {"judo_others": [...], "kendo_only": [...], "kenjo_share": [...]}, 明細の行)"""
+    stats = {t["name"]: {"judo_others": [], "kendo_only": [], "kenjo_share": []} for t in TARGETS}
+    detail = []
+    for ym, d in sorted(snaps.items()):
+        res = results_of(ym)
+        for g in d.get("groups", []):
+            kind = g.get("kind")
+            if kind not in stats:
+                continue
+            cnt, ours = g.get("counts") or {}, int(g.get("ours") or 0)
+            ids = g.get("ours_ids") or {}
+            n_judo, n_kenjo = len(ids.get("柔道", [])), len(ids.get("柔剣", []))
+            judo_o = max(cnt["柔道"] - ours, 0) if cnt.get("柔道") is not None else None
+            kendo_o = max(cnt["柔剣"] - cnt["柔道"], 0) if cnt.get("柔剣") is not None and cnt.get("柔道") is not None else None
+            st = stats[kind]
+            if judo_o is not None:
+                st["judo_others"].append(judo_o)
+            if kendo_o is not None:
+                st["kendo_only"].append(kendo_o)
+            if ours:
+                st["kenjo_share"].append(n_kenjo / ours)
+            start = g["g"].split()[1][:4] if " " in g.get("g", "") else ""
+            detail.append({"date": g.get("date"), "kind": kind, "ours_judo": n_judo, "ours_kenjo": n_kenjo,
+                           "judo_others": judo_o, "kendo_only": kendo_o,
+                           "result": res.get((g.get("date"), start), "")})
+    return stats, detail
+
+
+def _mean(xs):
+    return sum(xs) / len(xs) if xs else None
+
+
+def combine_competitors(comp_mle, stats):
+    """当落からの推測(comp_mle)と締切時点の実数の平均の、大きい方を使う(控えめに見る)。
+    → {種別: (推定競合, 実数の平均 or None, 実数の枠数)}"""
+    out = {}
+    for t in TARGETS:
+        b = t["name"]
+        c_mle, n, _w = comp_mle[b]
+        obs = stats.get(b, {}).get("judo_others") or []
+        c_obs = _mean(obs)
+        if n or obs:
+            c = max(c_mle if n else 0.0, c_obs or 0.0, MIN_COMPETITORS)
+        else:
+            c = DEFAULT_COMPETITORS
+        out[b] = (c, c_obs, len(obs))
+    return out
+
+
+def kenjo_suggestion(slots, assign, stats):
+    """日曜朝の「うち柔剣道場○件」の提案。過去の申込の柔剣道場の割合を使う(記録がなければ提案しない)。
+    → ({枠番号: (柔剣道場の件数, 柔剣道場で取れる見込み)}, 割合, 剣道場だけを希望する他団体の平均)"""
+    st = stats.get("日曜朝", {})
+    share, c_kendo = _mean(st.get("kenjo_share") or []), _mean(st.get("kendo_only") or [])
+    out = {}
+    if share is None:
+        return out, None, c_kendo
+    for s, sl in enumerate(slots):
+        if sl[3] != "日曜朝":
+            continue
+        k = len(assign[s])
+        n = min(k, int(math.floor(k * share + 0.5)))
+        p = n / (n + (c_kendo or 0)) if n and (n + (c_kendo or 0)) else 0.0
+        out[s] = (n, p)
+    return out, share, c_kendo
+
+
 # ---------------------------------------------------------------- 割り振り
 
 def p_secure(weight, c):
     return weight / (weight + c) if weight > 0 else 0.0
 
 
-def allocate(slots, competitors, ids, cap, weights=None):
+def allocate(slots, competitors, ids, cap, weights=None, slot_max=None, target=None):
     """slots: 候補枠のリスト、competitors: 枠ごとの推定競合(リスト)、ids: 使うID番号
     → {枠番号: [ID番号]}。確保できる日数の見込み(合計)が最大になるよう、
-    「1件足すと一番見込みが上がる(枠, ID)」を順に選ぶ。1IDは同じ枠に1回だけ、合計 cap 件まで。"""
+    「1件足すと一番見込みが上がる(枠, ID)」を順に選ぶ。1IDは同じ枠に1回だけ、合計 cap 件まで。
+    slot_max: 1枠の件数の上限、target: 見込みがここに届いた枠にはもう足さない(どちらも None なら制限なし)"""
     weights = weights or {}
     w_of = lambda i: weights.get(i, 1.0)  # noqa: E731
     remain = {i: cap for i in ids}
@@ -193,6 +319,10 @@ def allocate(slots, competitors, ids, cap, weights=None):
         best = None
         for s in range(len(slots)):
             base = p_secure(load[s], competitors[s])
+            if slot_max and len(assign[s]) >= slot_max:
+                continue
+            if target and base >= target:
+                continue
             for i in ids:
                 if remain[i] <= 0 or i in assign[s]:
                     continue
@@ -222,7 +352,8 @@ def parse_ids(text):
 # ---------------------------------------------------------------- Excel
 
 def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_bucket,
-                   slot_hist, per_id, new_ids, excluded, weight_new):
+                   slot_hist, per_id, new_ids, excluded, weight_new, kenjo=None, detail=None, comb=None):
+    """kenjo: kenjo_suggestion() の戻り値、detail: snapshot_stats() の明細、comb: combine_competitors() の戻り値"""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -248,7 +379,7 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
     # 1. 申込案
     ws = wb.active
     ws.title = "申込案"
-    ws["A1"] = f"{y}年{m}月分 抽選申込案(総合体育館 柔道場)  1IDあたり上限 {cap}件"
+    ws["A1"] = f"{y}年{m}月分 抽選申込案(総合体育館)  1IDあたり上限 {cap}件"
     ws["A1"].font = Font(bold=True, size=13)
     ws["A2"] = "○ = このIDでこの日に申し込む。代表が自由に書き換えてください(○を消す/足す)。"
     hdr = ["番号", "団体名", "新規"] + [slot_label(s) for s in slots] + ["件数"]
@@ -290,6 +421,15 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
             cell.alignment, cell.border = center, box
             if lab == "確保の見込み":
                 cell.number_format = "0%"
+        r += 1
+    sugg = (kenjo or ({}, None, None))[0]
+    if sugg:
+        ws.cell(row=r, column=2, value="うち柔剣道場(提案)").font = Font(bold=True)
+        for s in range(len(slots)):
+            cell = ws.cell(row=r, column=4 + s, value=sugg[s][0] if s in sugg else "")
+            cell.alignment, cell.border = center, box
+        r += 1
+        ws.cell(row=r, column=2, value="※ 日曜朝は「うち柔剣道場」の件数を柔剣道場で申し込む提案です(詳しくは「柔剣道場の検討」シート)。")
         r += 1
     ws.cell(row=r + 1, column=2, value="※ 数字は作成時の案の値です。○の修正は、管理画面の「🗳 抽選申込」タブで行うと件数も自動で計算されます。")
     ws.column_dimensions["A"].width = 6
@@ -347,7 +487,38 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
     for col, wdt in zip("ABCD", (16, 18, 16, 10)):
         ws4.column_dimensions[col].width = wdt
 
-    # 5. 代表の調整欄
+    # 5. 柔剣道場の検討
+    ws6 = wb.create_sheet("柔剣道場の検討")
+    ws6["A1"] = "締切時点(各月の申込期間の最後)の申込数の実数と、抽選の結果"
+    ws6["A1"].font = Font(bold=True, size=12)
+    ws6["A2"] = ("柔道場を争う他団体 = 柔道場か柔剣道場に申し込んだ他団体。"
+                 "剣道場だけの他団体 = 剣道場だけを希望した団体(柔剣道場で申し込むと、この団体とも争う)")
+    ws6.append([])
+    ws6.append(["日付", "種別", "当方 柔道場", "当方 柔剣道場", "柔道場を争う他団体", "剣道場だけの他団体", "結果"])
+    style_header(ws6, 4, 7)
+    for e in detail or []:
+        dd = date.fromisoformat(e["date"])
+        ws6.append([f"{dd.year}/{dd.month}/{dd.day}({'月火水木金土日'[dd.weekday()]})", e["kind"],
+                    e["ours_judo"], e["ours_kenjo"], e["judo_others"], e["kendo_only"], e["result"]])
+    if not detail:
+        ws6.append(["(まだ記録がありません。2027年1月分から積み上がります)"])
+    ws6.append([])
+    for b, (c, c_obs, n_obs) in (comb or {}).items():
+        mle = comp_by_bucket.get(b, (None, 0, 0))
+        obs_txt = f"実数の平均 {c_obs:.1f}件({n_obs}枠)" if c_obs is not None else "実数の記録なし"
+        ws6.append([b, f"当落からの推測 {mle[0]:.1f}件", obs_txt, f"→ 案で使った推定競合 {c:.1f}件"])
+    if kenjo and kenjo[1] is not None:
+        share, c_kendo = kenjo[1], kenjo[2]
+        ws6.append([])
+        ws6.append(["日曜朝の提案", f"過去の申込のうち柔剣道場の割合 {share:.0%}",
+                    f"剣道場だけの他団体 平均 {c_kendo or 0:.1f}件"])
+        for s, (n, p) in sorted(kenjo[0].items()):
+            ws6.append([slot_label(slots[s]), f"{len(assign[s])}件のうち柔剣道場 {n}件",
+                        f"柔剣道場で取れる見込み {p:.0%}", "取れなかったときも、柔道場の分で確保を狙う"])
+    for col, wdt in zip("ABCDEFG", (16, 26, 26, 30, 18, 18, 10)):
+        ws6.column_dimensions[col].width = wdt
+
+    # 6. 代表の調整欄
     ws5 = wb.create_sheet("代表の調整欄")
     ws5.append(["番号", "団体名", "新規(○)", "使わない(○)", "メモ(ノウハウなど)"])
     style_header(ws5, 1, 5)
@@ -363,7 +534,7 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
     return buf.getvalue(), total
 
 
-def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new):
+def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new, kenjo_sugg=None):
     """登録作業が読む申込案(ID番号と日付だけ。団体名・ログインIDは含めない)。"""
     by_id = {str(i): [] for i in ids}
     for s, lst in assign.items():
@@ -376,6 +547,9 @@ def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, we
         "competitors": {slots[s][0].isoformat() + " " + slots[s][3]: round(comp_list[s], 1) for s in range(len(slots))},
         "slots": [sl[0].isoformat() + " " + sl[1] + "-" + sl[2] for sl in slots],
         "applications": {k: sorted(v) for k, v in by_id.items()},
+        # 日曜朝の「うち柔剣道場○件」の提案(参考。登録作業は今までどおり柔道場だけを扱う)
+        "kenjo_suggest": {slots[s][0].isoformat() + " " + slots[s][1] + "-" + slots[s][2]: n
+                          for s, (n, _p) in sorted((kenjo_sugg or {}).items())},
     }
 
 
@@ -549,7 +723,17 @@ def main():
     slot_hist, per_id = summarize_history(accounts_rows)
     comp = estimate_competitors(slot_hist)
     for b, (c, n, w) in comp.items():
-        print(f"[実績] {b}: {n}枠中 {w}枠確保 → 推定競合 {c:.1f}件")
+        print(f"[実績] {b}: {n}枠中 {w}枠確保 → 当落からの推測 {c:.1f}件")
+    snaps = final_snapshots()
+    stats, detail = snapshot_stats(snaps)
+    comb = combine_competitors(comp, stats)
+    print(f"[実数] 締切時点の記録: {', '.join(f'{y}-{m:02d}' for (y, m) in snaps) or 'なし'}")
+    for b, (c, c_obs, n_obs) in comb.items():
+        obs = f"実数の平均 {c_obs:.1f}件({n_obs}枠)" if c_obs is not None else "実数なし"
+        print(f"[推定競合] {b}: {obs} → 案では {c:.1f}件")
+    slot_max = int(os.environ.get("SLOT_MAX", "") or SLOT_MAX)
+    target = float(os.environ.get("TARGET_P", "") or TARGET_P)
+    print(f"[1枠] 上限 {slot_max}件 / 見込み {target:.0%} に届いたら足さない")
 
     all_slots = candidate_slots(*plan_ym)
     cap = cap_for(plan_ym, closed, os.environ.get("PLAN_CAP", ""))
@@ -559,24 +743,34 @@ def main():
         print("[休館日] 読めなかったため、休館日を除かずに案を作ります")
     for sl in closed_slots:
         print(f"[休館日] {slot_label(sl)} は休館のため除きます")
-    comp_list = [comp[s[3]][0] for s in slots]
+    comp_list = [comb[s[3]][0] for s in slots]
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
     weights = {i: weight_new for i in new_ids}
-    assign = allocate(slots, comp_list, ids, cap, weights)
+    assign = allocate(slots, comp_list, ids, cap, weights, slot_max, target)
+    kenjo = kenjo_suggestion(slots, assign, stats)
     for s, sl in enumerate(slots):
-        print(f"[案] {slot_label(sl)}: {len(assign[s])}件")
+        extra = f"(うち柔剣道場 {kenjo[0][s][0]}件)" if s in kenjo[0] else ""
+        print(f"[案] {slot_label(sl)}: {len(assign[s])}件{extra}")
+    print(f"[案] 合計 {sum(len(v) for v in assign.values())}件(上限 {len(ids) * cap}件)")
 
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
     save_names_to_admin(names)
     data, total = build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp,
-                                 slot_hist, per_id, new_ids, excluded, weight_new)
+                                 slot_hist, per_id, new_ids, excluded, weight_new, kenjo, detail, comb)
     print(f"確保できる日数の見込み: {total:.1f} / {len(slots)} 日")
 
     lines = [f"{plan_ym[0]}年{plan_ym[1]}月分の抽選申込案です(添付Excel)。", "",
              f"・候補日 {len(slots)}日(日曜朝・水曜夜) / 使うID {len(ids)}個 / 1IDあたり上限 {cap}件(総合体育館で4件)",
-             f"・確保できる日数の見込み: {total:.1f} / {len(slots)} 日", ""]
+             f"・確保できる日数の見込み: {total:.1f} / {len(slots)} 日",
+             f"・申込の合計 {sum(len(v) for v in assign.values())}件(1枠は{slot_max}件まで、"
+             f"見込み{target:.0%}に届いた枠にはそれ以上足していません)", ""]
     for b, (c, n, w) in comp.items():
-        lines.append(f"・過去の{b}: {n}枠中 {w}枠確保(推定競合 {c:.1f}件)")
+        c2, c_obs, n_obs = comb[b]
+        obs = f"、締切時点の他団体 平均{c_obs:.1f}件({n_obs}枠)" if c_obs is not None else ""
+        lines.append(f"・過去の{b}: {n}枠中 {w}枠確保{obs} → 推定競合 {c2:.1f}件")
+    if kenjo[0]:
+        lines.append(f"・日曜朝は、これまでの申込と同じく約{kenjo[1]:.0%}を柔剣道場で申し込む案です"
+                     f"(剣道場だけを希望する他団体 平均{kenjo[2] or 0:.1f}件)。「柔剣道場の検討」シート参照")
     if closed is None:
         lines.append("・休館日を読み取れませんでした。休館の日は代表が○を消してください")
     elif closed_slots:
@@ -589,15 +783,14 @@ def main():
         lines.append(f"・読み取れなかったID(案から除外): {', '.join(map(str, failed))}")
     lines += ["", "「申込案」シートの○を代表が書き換えてください。",
               "「代表の調整欄」に新規ID・使わないIDを書いていただければ、案を作り直せます。",
-              "", "※ 推定競合は過去の当落から見積もった目安です。1日以降は実際の申込件数で見直します。",
+              "", "※ 推定競合は、過去の当落からの推測と、締切時点の他団体の実数の平均の大きい方です。1日以降は実際の申込件数で見直します。",
               "※ 休館日はサイトの表から自動で除いています。行事などで使えない日は代表が○を消してください。"]
     body = "\n".join(lines)
 
-    import json
     os.makedirs("plan", exist_ok=True)
     jpath = f"plan/plan_{plan_ym[0]}-{plan_ym[1]:02d}.json"
     with open(jpath, "w", encoding="utf-8") as f:
-        json.dump(plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new),
+        json.dump(plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, weight_new, kenjo[0]),
                   f, ensure_ascii=False, indent=1)
     print(f"申込案を保存しました: {jpath}(ID番号と日付のみ)")
 
