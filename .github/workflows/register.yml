@@ -1,5 +1,8 @@
 name: 合気道 抽選申込の登録(管理画面の確定を受けて)
 
+permissions:
+  contents: write   # IDごとの記録を保存するため
+
 on:
   schedule:
     - cron: "11,41 * 1-15,28-31 * *"   # 30分おきに管理画面の確定を確認(申込期間の前後のみ)
@@ -82,7 +85,16 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ needs.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
-          REGISTER_MODE: ${{ github.event.inputs.mode || 'dry' }}   # 11/1の不具合のため一時的に確認のみに戻す
+          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'dry' }}   # 本番は設定 REGISTER_MODE=live(なければ確認のみ)
           TEST_ID: ${{ github.event.inputs.test_id }}
           TEST_LIMIT: ${{ github.event.inputs.test_limit }}
         run: python register.py run
+      - name: IDごとの記録を保存
+        if: always()
+        run: |
+          ls plan/history_*.jsonl >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add plan/history_*.jsonl
+          git commit -m "IDごとの記録" || exit 0
+          git pull --rebase && git push

@@ -1,0 +1,102 @@
+name: 合気道 抽選申込(新しい流れ)
+
+permissions:
+  contents: write
+
+# 2026-11-19 決定の流れ(flow.py)。自宅パソコンのスケジューラ(pc/aikido_scheduler.ps1)から頼む
+#   plan   1日 0:05   各枠6件の案(申し込みはしない)
+#   check  2〜15日 18:00、15日は 9:00・15:00 も  見込みが85%を切った枠に足す案。必要ならメール
+#   auto21 15日 21:00  代表の承認がない分を自動で登録
+#   final  15日 22:45  残りの予備を見込みの低い枠から使い切る
+on:
+  schedule:
+    - cron: "5 15 28-31 * *"    # 日本時間 1日 0:05(28〜31日のUTC。flow.py が1日か判定)
+    - cron: "0 9 2-15 * *"      # 日本時間 18:00(2〜15日)
+    - cron: "0 0,6 15 * *"      # 日本時間 15日 9:00・15:00
+    - cron: "0 12 15 * *"       # 日本時間 15日 21:00
+    - cron: "45 13 15 * *"      # 日本時間 15日 22:45
+  workflow_dispatch:
+    inputs:
+      cmd:
+        description: plan / check / auto21 / final
+        default: check
+      month:
+        description: 対象月(例 2027-02)。空欄なら2か月先
+        default: ""
+      force:
+        description: 1=日付の決まりを無視して動かす(試験)
+        default: "0"
+      mode:
+        description: dry=確認のみ / live=本番(空欄なら設定 REGISTER_MODE、なければ確認のみ)
+        default: ""
+      send_mail:
+        description: 1=メールで送る 0=送らない(試験)
+        default: "1"
+      force_mail:
+        description: 1=見直しのメールを必ず送る(試験)
+        default: "0"
+
+concurrency:
+  group: register
+  cancel-in-progress: false
+
+jobs:
+  flow:
+    runs-on: [self-hosted, Windows]   # 自宅のWindowsパソコンで動かす(予約サイトがGitHubからのアクセスを拒否するため 2026-11)
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -L -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: どの処理か決める
+        id: which
+        run: |
+          c="${{ github.event.inputs.cmd }}"
+          if [ -z "$c" ]; then
+            case "${{ github.event.schedule }}" in
+              "5 15 28-31 * *") c=plan ;;
+              "0 12 15 * *") c=auto21 ;;
+              "45 13 15 * *") c=final ;;
+              *) c=check ;;
+            esac
+          fi
+          echo "cmd=$c" >> "$GITHUB_OUTPUT"
+          echo "処理: $c"
+      - name: 実行
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
+          PLAN_MONTH: ${{ github.event.inputs.month }}
+          FORCE: ${{ github.event.inputs.force || '0' }}
+          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'dry' }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+          FORCE_MAIL: ${{ github.event.inputs.force_mail || '0' }}
+        run: python flow.py ${{ steps.which.outputs.cmd }}
+      - name: 案・記録(ID番号と日付のみ)を保存
+        if: always()
+        run: |
+          ls plan/flow_*.json >/dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add plan/flow_*.json plan/history_*.jsonl 2>/dev/null || git add plan/flow_*.json
+          git commit -m "抽選申込の案・記録を保存" || exit 0
+          git pull --rebase && git push

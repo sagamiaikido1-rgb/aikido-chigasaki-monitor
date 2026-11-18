@@ -63,3 +63,12 @@ print("needs_run ok")
 assert rg.hold_decisions({"hold_choice": {G: "kenjo"}}, holds) == {16: G + " 柔剣", 17: G + " 柔剣", 18: G + " 柔剣"}
 assert rg.hold_decisions({"hold_choice": {G: ""}}, holds) == {}
 print("hold_choice ok")
+# 2026-11-19 の新しい形(days)
+S2 = "2027-02-21 0900-1200"
+d = {"days": {S2: {"ok": True, "room": "judo", "ids": [17, 18]}}, "status": "承認済み", "revision": 2}
+assert rg.needs_run(d)
+a, c = rg.planned_changes(d, {17: {S2}})
+assert a == {18: [S2]} and c == {}
+a, c = rg.planned_changes({"days": {S2: {"ok": True, "room": "kenjo", "ids": [17]}}}, {17: {S2}})
+assert a == {17: [S2 + " 柔剣"]} and c == {17: [S2]}
+print("days ok")

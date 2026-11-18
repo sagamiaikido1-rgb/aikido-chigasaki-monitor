@@ -37,11 +37,11 @@ Step '2026-11-18 20:12' @('analyze.yml|')
 Step '2026-11-28 00:15' @('register.yml|', 'analyze.yml|', 'lottery.yml|')  # 28日〜:11 と :41。前夜の分析・空きチェックは6時間以内なので遅れて頼む
 Step '2026-11-28 00:25' @()
 Step '2026-11-28 00:45' @('register.yml|')
-Step '2026-12-01 08:05' @('reminder.yml|force=0', 'register.yml|', 'day1.yml|')   # 1日 8:00(force=0 で時刻実行と同じ動き)。register は 07:41 の分。1日の申込案(0:05)は14時間以内なので遅れて頼む
+Step '2026-12-01 08:05' @('reminder.yml|force=0', 'register.yml|', 'flow.yml|cmd=plan')   # 1日 8:00(force=0 で時刻実行と同じ動き)。register は 07:41 の分。1日の申込案(0:05)は14時間以内なので遅れて頼む
 Step '2026-12-02 07:20' @('hiratsuka.yml|', 'register.yml|')    # 平塚 2日 7:17(register は 07:11 の分)
 Step '2026-12-15 10:45' @('samukawa.yml|', 'hiratsuka.yml|', 'register.yml|')  # 寒川 15日 7:17。平塚 11日の分(電源オフで未実行)は8日以内なので遅れて頼む。15日9時の件数チェックは1時間を過ぎたので見送り
-Step '2026-12-15 15:05' @('register.yml|', 'revise.yml|')     # 15日 15:00 の件数チェック
-Step '2026-12-15 22:35' @('register.yml|', 'analyze.yml|', 'hold.yml|', 'lottery.yml|')  # 保持分の締めくくり 22:30。18時・21時の件数チェックは過ぎたので見送り
+Step '2026-12-15 15:05' @('register.yml|', 'flow.yml|cmd=check')     # 15日 15:00 の見込みの確認
+Step '2026-12-15 22:50' @('register.yml|', 'analyze.yml|', 'flow.yml|cmd=final', 'lottery.yml|')  # 22:45 の予備の使い切り。21時の自動登録は1時間を過ぎたので見送り
 Step '2026-12-16 07:20' @()                                     # 16日は register なし。寒川は済み
 Step '2027-01-11 08:00' @('hiratsuka.yml|', 'register.yml|')    # 平塚 11日(年をまたいでも動く)
 

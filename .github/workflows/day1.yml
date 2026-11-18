@@ -4,9 +4,7 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    - cron: "5 15 28-31 * *"   # UTC15:05 = 日本時間 翌日0:05。日本時間の1日のときだけ動く(plan.py が判定)
-  # 自宅パソコンのスケジューラ(pc/aikido_scheduler.ps1)からも1日0:05に頼む(電源が切れていたときは遅れて動く)
+  # 2026-11-19 から定期実行はやめた(新しい流れ flow.yml に置き換え)。手動でのみ動かせる
   workflow_dispatch:
     inputs:
       month:

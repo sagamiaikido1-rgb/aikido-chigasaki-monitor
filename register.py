@@ -131,7 +131,7 @@ def target_month(today: date):
 def needs_run(doc, reprocess=False):
     """処理するか。reprocess=True(手動実行の「もう一度処理する」)なら、処理済みの確定ももう一度処理する。
     ただし登録中(別の実行が動いている)のときは処理しない。"""
-    if not doc or not (doc.get("applications") or doc.get("actions")):   # 保持分の確定は actions だけのことがある
+    if not doc or not (doc.get("applications") or doc.get("actions") or doc.get("days")):   # 保持分の確定は actions だけのことがある
         return False
     if reprocess:
         return doc.get("status") != "登録中"
@@ -160,6 +160,14 @@ def planned_changes(doc, current):
     どちらの場合も、確定した表に書かれていない申込(手で入れた分など)には触れない(11/1の反省)。
     → (追加 {ID: [...]}, 取消 {ID: [...]})"""
     add, cancel = {}, {}
+    if doc.get("days"):   # 2026-11-19 の新しい形: 日ごとの○×と部屋、その日に入れるID
+        import simple
+        for i, a in simple.days_to_actions(doc["days"], current).items():
+            if a["add"]:
+                add[i] = a["add"]
+            if a["cancel"]:
+                cancel[i] = a["cancel"]
+        return add, cancel
     acts = doc.get("actions")
     if "actions" in doc:   # 新しい形(空でも、書いていないものは何もしない)
         acts = acts or {}
@@ -496,7 +504,7 @@ def main():
                 failed.append(i)
                 print(f"[エラー] ID{i} を読めませんでした({type(e).__name__})")
         adds, cancels = planned_changes(doc, current)
-        if "actions" not in doc:
+        if "actions" not in doc and not doc.get("days"):
             print("[注意] 確定内容に追加・取消の指示(actions)がないため、足りない分の追加だけを行います(取消はしません)")
         if test_id:
             adds = {k: v for k, v in adds.items() if k == test_id}
@@ -545,6 +553,16 @@ def main():
                     except Exception as e:
                         print(f"[確認] ID{i} を読み直せませんでした({type(e).__name__})")
         browser.close()
+
+    if live and not testing:   # IDごとの記録(どのIDを、いつ、どの枠に)
+        try:
+            import flow
+            import simple
+            done = {i: {"add": [k for k in adds.get(i, []) if k not in skipped_by.get(i, [])], "cancel": cancels.get(i, [])}
+                    for i in set(adds) | set(cancels) if i not in apply_failed}
+            flow.append_history(ym, simple.history_lines(flow.now_text(), "代表", done))
+        except Exception as e:
+            print(f"[注意] IDごとの記録を残せませんでした({type(e).__name__})")
 
     names = {i: lc.GROUP_NAMES.get(uid, "") for (i, uid, _p) in accounts}
     n_add = sum(len(v) for v in adds.values())
