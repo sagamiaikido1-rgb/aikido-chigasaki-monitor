@@ -59,6 +59,10 @@ print("hold ok")
 
 assert rg.needs_run({"actions": {"16": {"add": [G]}}, "status": "承認済み", "revision": 1})
 assert not rg.needs_run({"status": "承認済み", "revision": 1})
+# 一部失敗は、確定し直さなくても自動でやり直す(MAX_RETRY 回まで)
+f = {"status": "一部失敗", "revision": 3, "processed_revision": 3, "days": {"x": {"ok": True}}}
+assert rg.needs_run(dict(f, retries=1)) and rg.needs_run(dict(f, retries=rg.MAX_RETRY))
+assert not rg.needs_run(dict(f, retries=rg.MAX_RETRY + 1))
 print("needs_run ok")
 assert rg.hold_decisions({"hold_choice": {G: "kenjo"}}, holds) == {16: G + " 柔剣", 17: G + " 柔剣", 18: G + " 柔剣"}
 assert rg.hold_decisions({"hold_choice": {G: ""}}, holds) == {}

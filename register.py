@@ -128,6 +128,9 @@ def target_month(today: date):
     return f"{y}-{m:02d}"
 
 
+MAX_RETRY = 3   # 一部失敗のとき、自動でやり直す回数
+
+
 def needs_run(doc, reprocess=False):
     """処理するか。reprocess=True(手動実行の「もう一度処理する」)なら、処理済みの確定ももう一度処理する。
     ただし登録中(別の実行が動いている)のときは処理しない。"""
@@ -135,6 +138,8 @@ def needs_run(doc, reprocess=False):
         return False
     if reprocess:
         return doc.get("status") != "登録中"
+    if doc.get("status") == "一部失敗" and int(doc.get("retries") or 0) <= MAX_RETRY:
+        return True   # 合わなかった分だけ、もう一度(今の申込と確定の差だけを申し込むので、入った分は二重にならない)
     return doc.get("status") == "承認済み" and \
         int(doc.get("revision") or 0) > int(doc.get("processed_revision") or 0)
 
@@ -482,6 +487,11 @@ def main():
         print(f"[テスト] mode={mode_} ID番号={test_id or '全部'} 追加の上限={test_limit or 'なし'}"
               "(管理画面の状態は変えず、メールも送りません)")
     revision = int(doc.get("revision") or 0)
+    # 自動のやり直しか(確定が新しくなっていない一部失敗) → 回数を数える。確定し直されたら 0 から
+    retries = int(doc.get("retries") or 0) if (doc.get("status") == "一部失敗" and
+                                              revision <= int(doc.get("processed_revision") or 0)) else 0
+    if retries:
+        print(f"[やり直し] 前回合わなかった分を、もう一度申し込みます({retries + 1}回目)")
     if token and not testing:
         fs_update(ym, {"status": "登録中"}, token)
     y, m = (int(x) for x in ym.split("-"))
@@ -512,7 +522,7 @@ def main():
             desired = {k: v for k, v in desired.items() if k == test_id}
         if test_limit:
             adds = {k: v[:test_limit] for k, v in adds.items()}
-        done_ok, done_ng, apply_failed, skipped_by = 0, 0, [], {}
+        done_ok, done_ng, apply_failed, skipped_by, mismatch_by = 0, 0, [], {}, {}
         if live or stop_before:
             for (i, uid, pw) in accounts:
                 if i in failed or (i not in adds and i not in cancels):
@@ -525,22 +535,6 @@ def main():
                     if sk:
                         skipped_by[i] = sk
                     done_ok += 1
-                    # 最初の1IDだけは、申込一覧を読み直して正しく入ったか確かめてから次へ進む
-                    # (新しい仕組みが初めて本番で動くときに、誰も見ていなくても被害を1IDで止めるため)
-                    if live and done_ok == 1 and adds.get(i):
-                        now = {row_slot(r, y, m) for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
-                               if row_slot(r, y, m) and any(w in r["status"] for w in ACTIVE)}
-                        miss = [x for x in adds[i] if x not in now and x not in sk]
-                        if miss:
-                            apply_failed.append(i)
-                            print(f"::error::[止めました] ID{i} の申込が一覧に見当たりません({len(miss)}件)。残りのIDは申し込みません")
-                            try:
-                                lc.ca.send_mail(f"【合気道】{m}月分 抽選申込 至急: 最初のIDで確認できず止めました",
-                                                f"ID番号{i}で申し込んだはずの {len(miss)}件が、抽選申込一覧に見当たりません。\n"
-                                                "安全のため、残りのIDの申込は行っていません。管理者に連絡してください。")
-                            except Exception:
-                                pass
-                            break
                 except Exception as e:
                     done_ng += 1
                     apply_failed.append(i)
@@ -563,6 +557,7 @@ def main():
                         missing = [x for x in adds.get(i, []) if x not in now and x not in skipped_by.get(i, [])]
                         left = [x for x in cancels.get(i, []) if x in now]
                         if missing or left:
+                            mismatch_by[i] = (missing, left)
                             if i not in apply_failed:
                                 apply_failed.append(i)
                             print(f"::warning::[確認] ID{i} は確定した内容とまだ違います(入っていない追加 {len(missing)}件・残っている取消 {len(left)}件)")
@@ -601,11 +596,32 @@ def main():
         lines_mail.append("※ 申し込めずに飛ばした枠(×など。そのIDの残りの申込は行いました):")
         for i, v in sorted(skipped_by.items()):
             lines_mail.append(f"  {lc.who_label(i, names.get(i, ''))}  " + "、".join(slot_text(x) for x in v))
+    if live and mismatch_by:
+        lines_mail.append("")
+        lines_mail.append("■ 申し込んだあとに読み直したら、確定と合わなかった分:")
+        for i, (ms, lf) in sorted(mismatch_by.items()):
+            t = ("入っていない: " + "、".join(slot_text(x) for x in ms) if ms else "") + \
+                ("  " if ms and lf else "") + ("取消できていない: " + "、".join(slot_text(x) for x in lf) if lf else "")
+            lines_admin.append(f"⚠ ID{i}  {t}")
+            lines_mail.append(f"  {lc.who_label(i, names.get(i, ''))}  {t}")
+    elif live and (adds or cancels) and not apply_failed:
+        lines_admin.append("✔ 申し込んだあと全IDを読み直し、確定どおり入っていることを確かめました")
+        lines_mail.append("")
+        lines_mail.append("✔ 申し込んだあと全IDを読み直し、確定どおり入っていることを確かめました。")
+    if live and (apply_failed or failed):
+        n_retry = retries + 1
+        if n_retry <= MAX_RETRY:
+            lines_admin.append(f"→ 合わない分だけ、30分後にもう一度自動で申し込みます({n_retry}/{MAX_RETRY}回目)。管理画面の「もう一度申し込む」でもすぐ動かせます")
+            lines_mail.append(f"→ 合わない分だけ、30分後にもう一度自動で申し込みます({n_retry}/{MAX_RETRY}回目)。")
+        else:
+            lines_admin.append(f"自動のやり直しは{MAX_RETRY}回で終わりました。抽選申込一覧を確かめてください")
+            lines_mail.append(f"→ 自動のやり直しは{MAX_RETRY}回で終わりました。抽選申込一覧を確かめてください。")
     if live and apply_failed:
         lines_admin.append("登録できなかった・表と合わないID: " + "、".join(map(str, sorted(apply_failed))))
         lines_mail.append("")
         lines_mail.append("※ 登録できなかった・表と合わないID: " + "、".join(lc.who_label(i, names.get(i, "")) for i in sorted(apply_failed)))
-        lines_mail.append("  抽選申込一覧を確認し、必要なら手で申し込んでください(締切 15日 23:59)。")
+        if retries + 1 > MAX_RETRY:
+            lines_mail.append("  抽選申込一覧を確認し、必要なら手で申し込んでください(締切 15日 23:59)。")
     if failed:
         lines_admin.append("読み取れなかったID: " + "、".join(map(str, failed)))
         lines_mail.append("※ 読み取れなかったID: " + "、".join(lc.who_label(i, names.get(i, "")) for i in failed))
@@ -617,11 +633,14 @@ def main():
     if token:
         status = ("登録済み" if not apply_failed and not failed else "一部失敗") if live else "確認のみ"
         fs_update(ym, {"status": status, "processed_revision": revision,
+                       "retries": (retries + 1) if (live and (apply_failed or failed)) else 0,
                        "result": {"checked_at": datetime.now(ZoneInfo('Asia/Tokyo')).strftime("%Y-%m-%d %H:%M"),
                                   "add": n_add, "cancel": n_cancel, "failed_ids": failed,
                                   "live": live, "lines": lines_admin}}, token)
     if os.environ.get("SEND_MAIL", "1") == "1":
-        lc.ca.send_mail(f"【合気道】{m}月分 抽選申込 " + ("登録結果" if live else "登録予定の確認"), "\n".join(lines_mail))
+        lc.ca.send_mail(f"【合気道】{m}月分 抽選申込 " + ("登録結果" if live else "登録予定の確認") +
+                        (f"(やり直し{retries}回目)" if retries else "") +
+                        ("・要確認" if live and apply_failed and retries >= MAX_RETRY else ""), "\n".join(lines_mail))
 
 
 if __name__ == "__main__":
