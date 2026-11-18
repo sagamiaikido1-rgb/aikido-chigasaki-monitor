@@ -40,6 +40,15 @@ site["counts"] = {s["g"]: 0 for s in st["slots"]}
 flow.cmd_plan(date(2026, 12, 1))
 st = flow.load_state("2027-02")
 assert not st["preview"] and "申込案" in sent[-1][0]
+# 仮の案のうちに代表が決めたIDは、1日に作り直しても引き継ぐ
+g0 = st["slots"][0]["g"]
+doc["v"] = {"days": {g0: {"ok": True, "room": "judo", "ids": [1, 2, 3, 4, 5, 13]}}}
+flow.cmd_plan(date(2026, 12, 1))
+st = flow.load_state("2027-02")
+assert st["plan"][g0] == [1, 2, 3, 4, 5, 13]
+doc["v"] = None
+flow.cmd_plan(date(2026, 12, 1))
+st = flow.load_state("2027-02")
 
 # 代表が承認して申し込まれた後の状態
 cur = {i: set() for i in range(1, 19)}

@@ -132,6 +132,12 @@ def cmd_plan(today):
     slots, skipped = simple.day_slots(y, m, avail)
     ids = [i for (i, _u, _p) in accounts if i not in failed]
     proposal, left, short = simple.initial_plan(slots, ids, existing=current)
+    # 仮の案のうちに代表が○×を付けていれば、その日に入れるIDを引き継ぐ(案と確定が食い違わないように)
+    days = ((read_doc(ym) or {}).get("days") or {}) if not preview else {}
+    for s in slots:
+        v = days.get(s["g"])
+        if v and v.get("ok") and v.get("ids"):
+            proposal[s["g"]] = [int(i) for i in v["ids"] if int(i) in ids]
     st = {"version": 3, "year": y, "month": m, "created": now_text(), "preview": preview,
           "target": simple.TARGET, "start": simple.START, "cap": simple.CAP,
           "slots": slots, "plan": proposal, "skipped": [[d.isoformat(), k, w] for d, k, w in skipped],
