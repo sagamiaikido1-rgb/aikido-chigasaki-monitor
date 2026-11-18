@@ -1,0 +1,62 @@
+name: 合気道 保持分の締めくくり(15日22:30)
+
+permissions:
+  contents: read
+
+on:
+  # 2026-11-18 決定: 日曜朝の保持分(1日には申し込まない3件)を、15日22:30に申し込む。
+  # 代表が管理画面で柔道場/柔剣道場を決めていればそのとおり、決まっていなければ柔道場。結果は必ずメールする。
+  # 自宅パソコンのスケジューラ(pc/aikido_scheduler.ps1)からも頼む
+  schedule:
+    - cron: "30 13 15 * *"   # UTC13:30 = 日本時間22:30、毎月15日
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 対象月(例 2027-02)。空欄なら申込期間中の月(15日のみ動く)
+        default: ""
+      mode:
+        description: dry=確認のみ / live=本番(空欄なら設定 REGISTER_MODE、なければ確認のみ)
+        default: ""
+      send_mail:
+        description: 1=メールで送る 0=送らない(テスト)
+        default: "1"
+
+concurrency:
+  group: register
+  cancel-in-progress: false
+
+jobs:
+  hold:
+    runs-on: [self-hosted, Windows]   # 自宅のWindowsパソコンで動かす(予約サイトがGitHubからのアクセスを拒否するため 2026-11)
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -L -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: 保持分を申し込む(決まっていなければ柔道場)
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          AIKIDO_ID_1: ${{ secrets.AIKIDO_ID_1 }}
+          AIKIDO_PASS_1: ${{ secrets.AIKIDO_PASS_1 }}
+          AIKIDO_ACCOUNTS: ${{ secrets.AIKIDO_ACCOUNTS }}
+          FIREBASE_EMAIL: ${{ secrets.FIREBASE_EMAIL }}
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
+          REGISTER_MONTH: ${{ github.event.inputs.month }}
+          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'dry' }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python register.py hold

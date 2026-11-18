@@ -281,22 +281,24 @@ def combine_competitors(comp_mle, stats):
     return out
 
 
-def kenjo_suggestion(slots, assign, stats):
-    """日曜朝の「うち柔剣道場○件」の提案。過去の申込の柔剣道場の割合を使う(記録がなければ提案しない)。
-    → ({枠番号: (柔剣道場の件数, 柔剣道場で取れる見込み)}, 割合, 剣道場だけを希望する他団体の平均)"""
+def kenjo_suggestion(slots, assign, stats, hold=None):
+    """日曜朝の「うち保持○件」(2026-11-18 決定)。
+    日曜朝は柔道場で申し込み、うち SUN_HOLD 件は1日には申し込まずに保持する。
+    10〜15日の件数を見て、代表が保持分を柔道場か柔剣道場に足す(15日22:30までに決まらなければ柔道場)。
+    → ({枠番号: (保持の件数, 保持を柔剣道場に足したときに柔剣道場で取れる見込み)}, None, 剣道場だけを希望する他団体の平均)"""
+    import alloc
+    hold = alloc.SUN_HOLD if hold is None else hold
     st = stats.get("日曜朝", {})
-    share, c_kendo = _mean(st.get("kenjo_share") or []), _mean(st.get("kendo_only") or [])
+    c_kendo = _mean(st.get("kendo_only") or [])
     out = {}
-    if share is None:
-        return out, None, c_kendo
     for s, sl in enumerate(slots):
         if sl[3] != "日曜朝":
             continue
         k = len(assign[s])
-        n = min(k, int(math.floor(k * share + 0.5)))
-        p = n / (n + (c_kendo or 0)) if n and (n + (c_kendo or 0)) else 0.0
-        out[s] = (n, p)
-    return out, share, c_kendo
+        n = min(k, hold)
+        if n:
+            out[s] = (n, alloc.secure_prob(k - n, n, 0, round(c_kendo or 0))[1])
+    return out, None, c_kendo
 
 
 # ---------------------------------------------------------------- 割り振り
@@ -424,12 +426,12 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
         r += 1
     sugg = (kenjo or ({}, None, None))[0]
     if sugg:
-        ws.cell(row=r, column=2, value="うち柔剣道場(提案)").font = Font(bold=True)
+        ws.cell(row=r, column=2, value="うち保持(1日には申し込まない)").font = Font(bold=True)
         for s in range(len(slots)):
             cell = ws.cell(row=r, column=4 + s, value=sugg[s][0] if s in sugg else "")
             cell.alignment, cell.border = center, box
         r += 1
-        ws.cell(row=r, column=2, value="※ 日曜朝は「うち柔剣道場」の件数を柔剣道場で申し込む提案です(詳しくは「柔剣道場の検討」シート)。")
+        ws.cell(row=r, column=2, value="※ 日曜朝の「うち保持」は1日には申し込まず、10〜15日の件数を見て柔道場か柔剣道場に足します(15日22:30までに決まらなければ柔道場)。")
         r += 1
     ws.cell(row=r + 1, column=2, value="※ 数字は作成時の案の値です。○の修正は、管理画面の「🗳 抽選申込」タブで行うと件数も自動で計算されます。")
     ws.column_dimensions["A"].width = 6
@@ -507,14 +509,14 @@ def build_workbook(plan_ym, slots, comp_list, assign, ids, names, cap, comp_by_b
         mle = comp_by_bucket.get(b, (None, 0, 0))
         obs_txt = f"実数の平均 {c_obs:.1f}件({n_obs}枠)" if c_obs is not None else "実数の記録なし"
         ws6.append([b, f"当落からの推測 {mle[0]:.1f}件", obs_txt, f"→ 案で使った推定競合 {c:.1f}件"])
-    if kenjo and kenjo[1] is not None:
-        share, c_kendo = kenjo[1], kenjo[2]
+    if kenjo and kenjo[0]:
+        c_kendo = kenjo[2]
         ws6.append([])
-        ws6.append(["日曜朝の提案", f"過去の申込のうち柔剣道場の割合 {share:.0%}",
+        ws6.append(["日曜朝の保持", "1日は柔道場だけで申し込み、保持分は10〜15日の件数を見て足す",
                     f"剣道場だけの他団体 平均 {c_kendo or 0:.1f}件"])
         for s, (n, p) in sorted(kenjo[0].items()):
-            ws6.append([slot_label(slots[s]), f"{len(assign[s])}件のうち柔剣道場 {n}件",
-                        f"柔剣道場で取れる見込み {p:.0%}", "取れなかったときも、柔道場の分で確保を狙う"])
+            ws6.append([slot_label(slots[s]), f"{len(assign[s])}件のうち保持 {n}件",
+                        f"保持を柔剣道場に足すと柔剣道場で取れる見込み {p:.0%}", "決まらなければ柔道場に足す"])
     for col, wdt in zip("ABCDEFG", (16, 26, 26, 30, 18, 18, 10)):
         ws6.column_dimensions[col].width = wdt
 
@@ -547,8 +549,8 @@ def plan_json(plan_ym, slots, comp_list, assign, ids, cap, new_ids, excluded, we
         "competitors": {slots[s][0].isoformat() + " " + slots[s][3]: round(comp_list[s], 1) for s in range(len(slots))},
         "slots": [sl[0].isoformat() + " " + sl[1] + "-" + sl[2] for sl in slots],
         "applications": {k: sorted(v) for k, v in by_id.items()},
-        # 日曜朝の「うち柔剣道場○件」の提案(参考。登録作業は今までどおり柔道場だけを扱う)
-        "kenjo_suggest": {slots[s][0].isoformat() + " " + slots[s][1] + "-" + slots[s][2]: n
+        # 日曜朝の「うち保持○件」(1日には申し込まない分。2026-11-18 決定)
+        "hold_suggest": {slots[s][0].isoformat() + " " + slots[s][1] + "-" + slots[s][2]: n
                           for s, (n, _p) in sorted((kenjo_sugg or {}).items())},
     }
 
@@ -749,7 +751,7 @@ def main():
     assign = allocate(slots, comp_list, ids, cap, weights, slot_max, target)
     kenjo = kenjo_suggestion(slots, assign, stats)
     for s, sl in enumerate(slots):
-        extra = f"(うち柔剣道場 {kenjo[0][s][0]}件)" if s in kenjo[0] else ""
+        extra = f"(うち保持 {kenjo[0][s][0]}件)" if s in kenjo[0] else ""
         print(f"[案] {slot_label(sl)}: {len(assign[s])}件{extra}")
     print(f"[案] 合計 {sum(len(v) for v in assign.values())}件(上限 {len(ids) * cap}件)")
 
@@ -769,7 +771,8 @@ def main():
         obs = f"、締切時点の他団体 平均{c_obs:.1f}件({n_obs}枠)" if c_obs is not None else ""
         lines.append(f"・過去の{b}: {n}枠中 {w}枠確保{obs} → 推定競合 {c2:.1f}件")
     if kenjo[0]:
-        lines.append(f"・日曜朝は、これまでの申込と同じく約{kenjo[1]:.0%}を柔剣道場で申し込む案です"
+        lines.append("・日曜朝は柔道場で申し込み、うち3件は1日には申し込まずに保持します。10〜15日の件数を見て、"
+                     "柔道場か柔剣道場(剣道対策)のどちらに足すかを代表に決めていただきます"
                      f"(剣道場だけを希望する他団体 平均{kenjo[2] or 0:.1f}件)。「柔剣道場の検討」シート参照")
     if closed is None:
         lines.append("・休館日を読み取れませんでした。休館の日は代表が○を消してください")

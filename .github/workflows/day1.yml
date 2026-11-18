@@ -6,13 +6,17 @@ permissions:
 on:
   schedule:
     - cron: "5 15 28-31 * *"   # UTC15:05 = 日本時間 翌日0:05。日本時間の1日のときだけ動く(plan.py が判定)
+  # 自宅パソコンのスケジューラ(pc/aikido_scheduler.ps1)からも1日0:05に頼む(電源が切れていたときは遅れて動く)
   workflow_dispatch:
     inputs:
       month:
         description: 申込案を作る月(例 2027-02)。空欄なら2か月先
         default: ""
       sun_kendo:
-        description: 日曜朝のうち柔剣道場の件数(0〜9)。空欄なら管理画面の設定(なければ5)
+        description: 日曜朝のうち1日に柔剣道場で申し込む件数(0〜9)。空欄なら管理画面の設定(なければ0)
+        default: ""
+      sun_hold:
+        description: 日曜朝のうち1日には申し込まず保持する件数(0〜9)。空欄なら管理画面の設定(なければ3)
         default: ""
       send_mail:
         description: 1=メールで送る 0=送らない(テスト)
@@ -20,14 +24,25 @@ on:
 
 jobs:
   day1:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]   # 自宅のWindowsパソコンで動かす(予約サイトがGitHubからのアクセスを拒否するため 2026-11)
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-      - run: pip install -r requirements.txt && playwright install --with-deps chromium
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -L -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://k7.p-kashikan.jp/chigasaki-city/ || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
       - name: 空き状況(柔道場・柔剣道場)と今の申込を読んで、申込案をつくる(申込はしない)
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
@@ -40,6 +55,7 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           PLAN_MONTH: ${{ github.event.inputs.month }}
           SUN_KENDO: ${{ github.event.inputs.sun_kendo }}
+          SUN_HOLD: ${{ github.event.inputs.sun_hold }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
         run: python plan.py day1
       - name: 申込案(ID番号と日付のみ)を保存

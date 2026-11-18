@@ -43,3 +43,17 @@ print("actions ok")
 add, cancel = rg.planned_changes({"actions": {}, "applications": {"11": ["2027-01-27 1800-2100"]}}, cur)
 assert add == {} and cancel == {}
 print("empty actions ok")
+
+# 15日22:30 の保持分の締めくくり
+G = "2027-02-07 0900-1200"
+holds = {G: [16, 17, 18]}
+doc = {"actions": {"17": {"add": [G + " 柔剣"]}, "16": {"add": ["2027-02-03 1800-2100"]}}}
+dec = rg.hold_decisions(doc, holds)
+assert dec == {17: G + " 柔剣"}
+cur = {18: {G}, 16: {"2027-02-03 1800-2100"}}
+adds, rows = rg.hold_plan(holds, cur, dec)
+assert adds == {16: [G], 17: [G + " 柔剣"]}          # 18 はその日にもう申込済み
+assert rows == [(16, G, "既定"), (17, G + " 柔剣", "代表")]
+assert rg.hold_decisions(None, holds) == {}
+print("hold ok")
+

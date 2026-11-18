@@ -31,8 +31,10 @@ $Jobs = @(
   @{ Name='申込のお知らせ(1日)';        Wf='reminder.yml';  Days=@(1);         Times=@('08:00'); CatchUp=14;    Inputs=@{ force='0' } }
   @{ Name='抽選申込の登録(30分おき)';   Wf='register.yml';  Days=@(1..15 + 28..31); Times=@(0..23 | ForEach-Object { '{0:00}:11' -f $_; '{0:00}:41' -f $_ }); CatchUp=0.5; Inputs=@{} }
   @{ Name='抽選分析';                   Wf='analyze.yml';   Days=@();          Times=@('20:11'); CatchUp=6;     Inputs=@{} }
-  @{ Name='件数チェック(修正案)';        Wf='revise.yml';    Days=@(1..15);     Times=@('20:41'); CatchUp=6;     Inputs=@{} }
-  @{ Name='件数チェック(15日の昼)';      Wf='revise.yml';    Days=@(15);        Times=@('10:41'); CatchUp=6;     Inputs=@{} }
+  @{ Name='1日の申込案';                Wf='day1.yml';      Days=@(1);         Times=@('00:05'); CatchUp=14;    Inputs=@{} }
+  @{ Name='件数チェック(毎日18時)';      Wf='revise.yml';    Days=@(1..15);     Times=@('18:00'); CatchUp=3;     Inputs=@{} }
+  @{ Name='件数チェック(15日 9・15・21時)'; Wf='revise.yml';  Days=@(15);        Times=@('09:00','15:00','21:00'); CatchUp=1; Inputs=@{} }
+  @{ Name='保持分の締めくくり(15日22:30)'; Wf='hold.yml';     Days=@(15);        Times=@('22:30'); CatchUp=1;     Inputs=@{} }
   @{ Name='落選枠の空きチェック';        Wf='lottery.yml';   Days=@();          Times=@('21:15'); CatchUp=6;     Inputs=@{} }
 )
 

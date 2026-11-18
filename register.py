@@ -320,9 +320,110 @@ def status_report(ym):
         lc.ca.send_mail(f"【合気道】{m}月分 抽選申込の状況(全ID)", "\n".join(mail))
 
 
+def hold_decisions(doc, holds):
+    """管理画面で代表が決めた保持分の行き先。doc["actions"] の追加のうち、保持IDのその日の枠。
+    → {ID: 枠}(柔道場 "YYYY-MM-DD 0900-1200" か 柔剣道場 "... 柔剣")"""
+    out = {}
+    acts = (doc or {}).get("actions") or {}
+    for g, ids in (holds or {}).items():
+        for i in ids:
+            for k in (acts.get(str(i)) or {}).get("add", []) or []:
+                if k in (g, g + " 柔剣"):
+                    out[i] = k
+    return out
+
+
+def hold_plan(holds, current, decided):
+    """15日22:30の締めくくり: まだ申し込んでいない保持IDを、代表が決めた枠(なければ柔道場)に足す。
+    current: {ID: set(枠)}。その日にもう申し込んでいるIDは済みとして飛ばす。
+    → {ID: [枠]}, [(ID, 枠, "代表"/"既定")]"""
+    adds, rows = {}, []
+    for g, ids in sorted((holds or {}).items()):
+        for i in ids:
+            if any(k[:10] == g[:10] for k in current.get(i, set())):
+                continue
+            k = decided.get(i, g)
+            adds.setdefault(i, []).append(k)
+            rows.append((i, k, "代表" if i in decided else "既定"))
+    return adds, rows
+
+
+def hold_main(ym):
+    """15日22:30: 保持分のうち、まだ申し込んでいない分を申し込む(決まっていなければ柔道場)。結果は必ずメールする。"""
+    import lottery_check as lc
+    import plan
+    import revise
+    from playwright.sync_api import sync_playwright
+    y, m = (int(x) for x in ym.split("-"))
+    holds = revise.load_holds((y, m))
+    if not holds:
+        print("保持分はありません(1日の申込案に保持なし)")
+        return
+    doc = None
+    try:
+        doc = fs_get(ym, sign_in())
+    except Exception as e:
+        print(f"[注意] 管理画面の確定を読めませんでした({err_text(e)})。保持分はすべて柔道場に足します")
+    decided = hold_decisions(doc, holds)
+    mode_ = os.environ.get("REGISTER_MODE", "dry")
+    live = mode_ == "live"
+    accounts = lc.load_accounts()
+    need = {i for v in holds.values() for i in v}
+    acc = [a for a in accounts if a[0] in need]
+    results = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        current, failed, names = read_current(browser, acc, y, m)
+        adds, rows = hold_plan(holds, current, decided)
+        for (i, uid, pw) in acc:
+            if i not in adds or i in failed:
+                continue
+            if not live:
+                results[i] = "確認のみ(申し込んでいません)"
+                continue
+            time.sleep(3)
+            try:
+                sk = []
+                apply_changes(browser, uid, pw, y, m, adds[i], [], False, False, sk)
+                now = {row_slot(r, y, m) for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
+                       if row_slot(r, y, m) and any(w in r["status"] for w in ACTIVE)}
+                results[i] = "申込済み" if all(k in now for k in adds[i]) else "要確認(申込一覧に見当たりません)"
+            except Exception as e:
+                results[i] = "失敗"
+                print(f"::error::[エラー] ID{i} の保持分の申込に失敗しました: {str(e)[:150]}")
+        browser.close()
+    who = lambda i: lc.who_label(i, names.get(i, ""))  # noqa: E731
+    lines = [f"{y}年{m}月分 日曜朝の保持分の申込(15日22:30の締めくくり)", ""]
+    if not live:
+        lines += ["※ 確認のみの設定のため、実際には申し込んでいません。必要なら下の内容を手で申し込んでください。", ""]
+    if rows:
+        lines.append("■ 申し込んだ保持分")
+        for i, k, by in rows:
+            lines.append(f"  {who(i)}: {slot_text(k)}{'' if k.endswith(' 柔剣') else '・柔道場'}"
+                         f"({'代表の判断' if by == '代表' else '判断なし → 柔道場'}) … {results.get(i, '読み取り失敗のため未処理')}")
+    else:
+        lines.append("■ 保持分はすべて申込済みでした(追加はありません)")
+    if failed:
+        lines.append("※ 読み取れなかったID(未処理・手で確認してください): " + "、".join(who(i) for i in failed))
+    lines += ["", "締切は今日 23:59 です。"]
+    print("\n".join(lines))
+    if os.environ.get("SEND_MAIL", "1") == "1":
+        bad = [i for i, r in results.items() if r != "申込済み"] + list(failed)
+        lc.ca.send_mail(f"【合気道】{m}月分 保持分の申込 {len(rows)}件" + ("(要確認あり)" if bad else ""), "\n".join(lines))
+        print("メールを送信しました。")
+
+
 def main():
     from zoneinfo import ZoneInfo
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode == "hold":
+        today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
+        ym = os.environ.get("REGISTER_MONTH", "").strip() or target_month(today)
+        if not ym or (today.day != 15 and not os.environ.get("REGISTER_MONTH", "").strip()):
+            print("15日ではないので何もしません")
+            return
+        hold_main(ym)
+        return
     if mode == "names-test":
         names_test()
         return

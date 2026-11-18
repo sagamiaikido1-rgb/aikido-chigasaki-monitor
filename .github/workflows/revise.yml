@@ -6,8 +6,10 @@ permissions:
 on:
   # 2026-11 から自宅のWindowsパソコンで動かす。電源が切れているときは、次に電源を入れたときに動く(24時間以内)
   schedule:
-    - cron: "41 11 1-15 * *"   # UTC11:41 = 日本時間20:41、毎月1〜15日(抽選分析の後)
-    - cron: "41 1 15 * *"      # 15日だけ昼にも(UTC1:41 = 日本時間10:41)。締切前に判断の時間を残すため
+    # 2026-11-18 決定: 1〜15日の毎日18時に件数を記録(メールは10〜15日に他団体が増えたときだけ)。
+    # 15日は 9時・15時・18時・21時(22:30 は保持分の締めくくり hold.yml)
+    - cron: "0 9 1-15 * *"     # UTC9:00 = 日本時間18:00、毎月1〜15日
+    - cron: "0 0,6,12 15 * *"  # 15日の 日本時間9:00・15:00・21:00
   workflow_dispatch:
     inputs:
       month:
@@ -31,6 +33,9 @@ on:
       note:
         description: メール本文の先頭に付けるお知らせ・訂正(空欄なら付けない)
         default: ""
+      force_mail:
+        description: 1=他団体が増えていなくてもメールを送る(テスト)
+        default: "0"
 
 jobs:
   revise:
@@ -68,6 +73,7 @@ jobs:
           FORCE: ${{ github.event.inputs.force || '0' }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
           MAIL_NOTE: ${{ github.event.inputs.note }}
+          FORCE_MAIL: ${{ github.event.inputs.force_mail || '0' }}
         run: python revise.py
       - name: 修正案(ID番号と日付のみ)を保存
         if: success()
@@ -75,6 +81,6 @@ jobs:
           ls plan/revise_*.json >/dev/null 2>&1 || exit 0
           git config user.name "github-actions[bot]"
           git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
-          git add plan/revise_*.json
+          git add plan/revise_*.json plan/trend_*.jsonl 2>/dev/null || git add plan/revise_*.json
           git commit -m "抽選期間中の件数と修正案を保存" || exit 0
           git pull --rebase && git push

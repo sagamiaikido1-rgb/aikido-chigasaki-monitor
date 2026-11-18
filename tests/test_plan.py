@@ -97,12 +97,12 @@ cmb = plan.combine_competitors({"日曜朝": (1.1, 9, 8), "水曜夜": (0.7, 12,
 assert cmb["日曜朝"][0] == 1.1 and cmb["水曜夜"][0] == 1.0
 ks, share, ck = plan.kenjo_suggestion(slots, a3, st)
 s0 = next(s for s in range(len(slots)) if slots[s][3] == "日曜朝")
-assert ks[s0][0] == round(len(a3[s0]) * 5 / 9) and ck == 3
+assert ks[s0][0] == 3 and ck == 3 and 0 < ks[s0][1] < 1   # 日曜朝は保持3件
 data, total = plan.build_workbook((2027, 1), slots, comp_list, a3, ids, {}, 4, comp, hist, per, set(), set(), 1.5,
                                   (ks, share, ck), det, cmb)
 assert data[:2] == b"PK"
 j = plan.plan_json((2027, 1), slots, comp_list, a3, ids, 4, set(), set(), 1.5, ks)
-assert j["kenjo_suggest"]
+assert j["hold_suggest"] and set(j["hold_suggest"].values()) == {3}
 print("snapshot ok")
 # 柔道場・柔剣道場の空き状況
 judo = ("<table><tr><td>1/6(水)</td><td onclick=\"changeCheckStatus('x','2027/1/6',1,'18002100')\">抽選(0)</td></tr>"
