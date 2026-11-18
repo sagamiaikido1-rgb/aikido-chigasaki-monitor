@@ -131,7 +131,7 @@ def target_month(today: date):
 def needs_run(doc, reprocess=False):
     """処理するか。reprocess=True(手動実行の「もう一度処理する」)なら、処理済みの確定ももう一度処理する。
     ただし登録中(別の実行が動いている)のときは処理しない。"""
-    if not doc or not doc.get("applications"):
+    if not doc or not (doc.get("applications") or doc.get("actions")):   # 保持分の確定は actions だけのことがある
         return False
     if reprocess:
         return doc.get("status") != "登録中"

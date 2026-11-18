@@ -57,3 +57,6 @@ assert rows == [(16, G, "既定"), (17, G + " 柔剣", "代表")]
 assert rg.hold_decisions(None, holds) == {}
 print("hold ok")
 
+assert rg.needs_run({"actions": {"16": {"add": [G]}}, "status": "承認済み", "revision": 1})
+assert not rg.needs_run({"status": "承認済み", "revision": 1})
+print("needs_run ok")
