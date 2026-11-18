@@ -28,3 +28,9 @@ class P:  # tray_rows uses inner_text
 assert apply.tray_rows(P()) == ["1/6 18:00-21:00"]
 assert apply.slot_words("2027-01-06 1800-2100") == "1/6 18:00-21:00"
 print("apply js ok")
+
+import apply as _ap
+assert _ap.parse_slot("2027-01-17 0900-1200 柔剣") == (2027, 1, 17, "0900", "1200")
+assert _ap.room_of("2027-01-17 0900-1200 柔剣") == "柔剣道場" and _ap.room_of("2027-01-17 0900-1200") == "柔道場"
+assert _ap.tray_words("2027-01-17 0900-1200 柔剣") == "1/17 09:00-12:00"
+print("room ok")

@@ -805,5 +805,178 @@ def main():
         print(f"保存しました: out/{fname}(このファイルはリポジトリに保存しません)")
 
 
+
+
+
+# ---------------------------------------------------------------- 空き状況(柔道場・柔剣道場)
+
+COUNT_RE = re.compile(r"抽選\s*[(（]\s*(\d+)\s*[)）]")
+CELL_DATE_RE = re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})")
+CELL_TIME_RE = re.compile(r"['\"](\d{2})(\d{2})(\d{2})(\d{2})['\"]")
+
+
+def parse_cells(html):
+    """抽選申込画面(月の表)のHTML → {(date, "HHMM", "HHMM"): (記号, 抽選の件数 or None)}
+    日付・時間帯は、セルの onclick などに書かれた 'YYYY/M/D' と 'HHMMHHMM' で決める。
+    「抽選(n)」があれば ○、ほかは書かれている文字(×・-・休館)をそのまま記号にする。"""
+    out = {}
+    for td in re.findall(r"<td[^>]*>.*?</td>", html, re.IGNORECASE | re.DOTALL):
+        d, t = CELL_DATE_RE.search(td), CELL_TIME_RE.search(td)
+        if not d or not t:
+            continue
+        key = (date(int(d.group(1)), int(d.group(2)), int(d.group(3))),
+               t.group(1) + t.group(2), t.group(3) + t.group(4))
+        text = lc.cell_text(td).strip()
+        m = COUNT_RE.search(text)
+        if m:
+            out[key] = ("○", int(m.group(1)))
+        elif "休館" in text:
+            out[key] = ("休館", None)
+        elif "×" in text:
+            out[key] = ("×", None)
+        else:
+            out[key] = (text[:6] or "-", None)
+    return out
+
+
+def availability(html_by_room, year, month):
+    """{"柔道": HTML, "柔剣": HTML} → alloc.build_slots に渡す空き状況と、部屋ごとの抽選件数。
+    表で日時が読めない枠は、申し込めない(「×」)として扱う(11/1 の「×」の日と同じ扱い)。
+    → (avail {(date, "朝"/"夜", "柔道"/"柔剣"): 記号}, counts {(date, start, end, 部屋): 件数}, 診断の行)"""
+    avail, counts, diag = {}, {}, []
+    for room, html in html_by_room.items():
+        if html is None:
+            diag.append(f"[空き状況] {room}の表を読めませんでした(この部屋は申し込まない扱い)")
+            continue
+        cells = parse_cells(html)
+        closed = parse_closed_days(html, year)
+        d = date(year, month, 1)
+        while d.month == month:
+            want = []
+            if d.weekday() == 6:
+                want = [("朝", "0900", "1200"), ("夜", "1800", "2100")] if room == "柔道" else [("朝", "0900", "1200")]
+            elif d.weekday() == 2 and room == "柔道":
+                want = [("夜", "1800", "2100")]
+            for slot, st, en in want:
+                if d in closed:
+                    mark, n = "休館", None
+                else:
+                    mark, n = cells.get((d, st, en), ("×", None))
+                avail[(d, slot, room)] = mark
+                if n is not None:
+                    counts[(d, st, en, room)] = n
+            d += timedelta(days=1)
+        diag.append(f"[空き状況] {room}: 読めたセル {len(cells)}件 / 休館日 {len(closed)}日")
+    return avail, counts, diag
+
+
+# ---------------------------------------------------------------- 1日0時すぎの申込案(2026-11 決定の新しい作り方)
+
+def read_rooms(browser, uid, pw, year, month):
+    """柔道場・柔剣道場の月の表を読む。→ {"柔道": HTML or None, "柔剣": HTML or None}"""
+    return {"柔道": read_lottery_page(browser, uid, pw, year, month, "柔道場"),
+            "柔剣": read_lottery_page(browser, uid, pw, year, month, "柔剣道場")}
+
+
+def day1_json(plan_ym, r, current, failed, sun_kendo, counts):
+    """管理画面が読む1日の申込案(ID番号と日付だけ。団体名・ログインIDは含めない)。"""
+    import alloc
+    slots = [{"key": s[0], "date": s[1].isoformat(), "kind": s[2], "room": s[3], "target": s[4]} for s in r["slots"]]
+    return {
+        "version": 2, "stage": "day1", "year": plan_ym[0], "month": plan_ym[1],
+        "generated_at": datetime.now(JST).strftime("%Y-%m-%d %H:%M"),
+        "cap": alloc.CAP, "per_slot": r["per_slot"], "sun_kendo": sun_kendo,
+        "slots": slots,
+        "skipped": [{"date": d.isoformat(), "kind": k, "why": str(w)} for d, k, w in r["skipped"]],
+        "current": {str(i): sorted(v) for i, v in current.items() if v},
+        "add": {k: v for k, v in r["add"].items() if v},
+        "short": [k for k, _n in r["short"]],
+        "counts": {f"{d.isoformat()} {st}-{en}" + (" 柔剣" if room == "柔剣" else ""): n
+                   for (d, st, en, room), n in counts.items()},
+        "failed_ids": sorted(failed),
+    }
+
+
+def day1_main(plan_ym):
+    """1日0時すぎに動く。空き状況(柔道場・柔剣道場)と全IDの今の申込を読み、
+    1枠9件(足りなければ8件)・日曜朝が×なら夜に1件、の決まりで申込案を作る。
+    今ある申込は取り消さず、足りない分だけを足す案にする。代表代行が管理画面で選んで確定する。"""
+    import json
+    import alloc
+    import register as rg
+    from playwright.sync_api import sync_playwright
+
+    accounts = lc.load_accounts()
+    if not accounts:
+        print("[エラー] ログインIDが登録されていません")
+        sys.exit(1)
+    token = None
+    try:
+        token = rg.sign_in()
+    except Exception as e:
+        print(f"[設定] 管理者ログインに失敗しました({rg.err_text(e)})")
+    rules = rg.read_rules(token) if token else {}
+    sun_kendo = alloc.sun_kendo_from(os.environ.get("SUN_KENDO", "") or rules.get("sun_kendo", ""))
+    y, m = plan_ym
+    print(f"1日の申込案: {y}年{m}月 / ID数 {len(accounts)} / 日曜朝の柔剣道場 {sun_kendo}件")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        _i, uid, pw = accounts[0]
+        rooms = read_rooms(browser, uid, pw, y, m)
+        current, failed, names = rg.read_current(browser, accounts, y, m)
+        browser.close()
+    avail, counts, diag = availability(rooms, y, m)
+    for line in diag:
+        print(line)
+    ids = [i for (i, _u, _p) in accounts if i not in failed]
+    existing = {}
+    for i, v in current.items():
+        for k in v:
+            existing.setdefault(k, []).append(i)
+    r = alloc.make_plan(y, m, avail, ids, existing=existing, sun_kendo=sun_kendo)
+    for s in r["slots"]:
+        print(f"[案] {s[0]} 目標{s[4]} 今{len(existing.get(s[0], []))} 追加{len(r['add'][s[0]])}")
+    for d, k, w in r["skipped"]:
+        print(f"[外した枠] {d} {k} {w}")
+    data = day1_json(plan_ym, r, current, failed, sun_kendo, counts)
+    os.makedirs("plan", exist_ok=True)
+    jpath = f"plan/day1_{y}-{m:02d}.json"
+    with open(jpath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    print(f"申込案を保存しました: {jpath}(ID番号と日付のみ)")
+
+    n_add = sum(len(v) for v in r["add"].values())
+    n_now = sum(len(v) for v in current.values())
+    lines = [f"{y}年{m}月分 1日の申込案ができました。", "",
+             f"・申し込む枠: 日曜朝 {len({s[1] for s in r['slots'] if s[2] == '日曜朝'})}日、"
+             f"日曜夜 {len([s for s in r['slots'] if s[2] == '日曜夜'])}日、水曜夜 {len([s for s in r['slots'] if s[2] == '水曜夜'])}日",
+             f"・1枠 {r['per_slot']}件(日曜朝は柔剣道場 {min(sun_kendo, r['per_slot'])}件・柔道場 {r['per_slot'] - min(sun_kendo, r['per_slot'])}件、日曜夜は1件)",
+             f"・今の申込 {n_now}件(取り消しません) / 追加の案 {n_add}件 / 予備 {alloc.CAP * len(ids) - n_now - n_add}件"]
+    if r["skipped"]:
+        lines.append("・外した枠: " + "、".join(f"{d.month}/{d.day} {k}({w})" for d, k, w in r["skipped"]))
+    if r["short"]:
+        lines.append("・IDの残りが足りず、目標に届かない枠があります")
+    if failed:
+        lines.append("・読み取れなかったID(案から除外): " + "、".join(lc.who_label(i, names.get(i, "")) for i in failed))
+    lines += ["", "管理画面「🗳 抽選申込」の「決める」画面で、枠ごとに「申し込む／見送る」を選んで確定してください。"]
+    if os.environ.get("SEND_MAIL", "1") == "1":
+        lc.ca.send_mail(f"【合気道】{m}月分 1日の申込案(追加{n_add}件)", "\n".join(lines))
+        print("メールを送信しました。")
+
+
+def is_day1_window(now):
+    """日本時間の毎月1日(0時すぎ)か。Actions の予定は前月末の UTC 15時台に動くので、日本時間で判定する。"""
+    return now.day == 1
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "day1":
+        now = datetime.now(JST)
+        ym = os.environ.get("PLAN_MONTH", "").strip()
+        if not ym and not is_day1_window(now) and os.environ.get("FORCE", "0") != "1":
+            print("日本時間の1日ではないので何もしません")
+            sys.exit(0)
+        target = tuple(int(x) for x in ym.split("-")) if ym else add_months(now.year, now.month, 2)
+        day1_main(target)
+    else:
+        main()

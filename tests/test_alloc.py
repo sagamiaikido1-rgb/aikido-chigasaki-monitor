@@ -1,0 +1,131 @@
+# -*- coding: utf-8 -*-
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from datetime import date
+import alloc
+
+
+def jan(**kw):
+    y, av = 2027, {}
+    for dd in range(1, 32):
+        d = date(y, 1, dd)
+        if d.weekday() == 2:
+            av[(d, "夜", "柔道")] = "○"
+        if d.weekday() == 6:
+            av[(d, "朝", "柔道")] = av[(d, "朝", "柔剣")] = av[(d, "夜", "柔道")] = "○"
+    for r in ("柔道", "柔剣"):
+        av[(date(y, 1, 3), "朝", r)] = "休館"
+        av[(date(y, 1, 10), "朝", r)] = av[(date(y, 1, 24), "朝", r)] = "×"
+    av[(date(y, 1, 3), "夜", "柔道")] = "休館"
+    slots, _ = alloc.build_slots(y, 1, av, **kw)
+    a, rem, short = alloc.allocate(slots, list(range(1, 19)))
+    return slots, a, rem, short
+
+
+def test_default_split_and_limits():
+    slots, a, rem, short = jan()
+    assert not short and sum(len(v) for v in a.values()) == 56
+    assert len(a["2027-01-17 0900-1200 柔剣"]) == 5 and len(a["2027-01-17 0900-1200"]) == 4
+    assert len(a["2027-01-10 1800-2100"]) == 1 and "2027-01-03 0900-1200" not in a
+    assert all(v >= 0 for v in rem.values())
+    apps = alloc.to_applications(a, list(range(1, 19)))
+    for lst in apps.values():
+        days = [k[:10] for k in lst]
+        assert len(lst) <= 4 and len(days) == len(set(days))
+    assert set(a["2027-01-17 0900-1200 柔剣"]) == {14, 15, 16, 17, 18}
+
+
+def test_split_is_variable():
+    for n in (0, 3, 9):
+        slots, a, _, _ = jan(sun_kendo=n)
+        k = len(a.get("2027-01-17 0900-1200 柔剣", []))
+        j = len(a.get("2027-01-17 0900-1200", []))
+        assert (k, j) == (n, 9 - n)
+
+
+def test_sun_kendo_from():
+    assert alloc.sun_kendo_from("") == 5
+    assert alloc.sun_kendo_from("3") == 3
+    assert alloc.sun_kendo_from("12") == 9
+    assert alloc.sun_kendo_from("abc") == 5
+
+
+def test_diff_keeps_existing_and_fills_to_target():
+    slots, _, _, _ = jan()
+    ex = {}
+    for k in ["2027-01-06 1800-2100", "2027-01-13 1800-2100", "2027-01-20 1800-2100", "2027-01-27 1800-2100"]:
+        ex.setdefault(k, []).append(10)
+    for i in (12, 14, 16, 18):
+        for k in ["2027-01-13 1800-2100", "2027-01-17 0900-1200", "2027-01-27 1800-2100", "2027-01-31 0900-1200"]:
+            ex.setdefault(k, []).append(i)
+    ids = list(range(1, 19))
+    add, rem, short = alloc.allocate(slots, ids, existing=ex)
+    r = alloc.diff_report(slots, ids, ex, add)
+    assert not short and r["total"] == {"max": 72, "now": 20, "add": 36, "after_left": 16}
+    assert all(x["after"] == x["target"] for x in r["slots"])
+    assert all(x["after_left"] >= 0 for x in r["ids"])
+    for key, lst in add.items():           # 今ある申込と同じ日に同じIDを入れない
+        for i in lst:
+            assert not any(i in v and k[:10] == key[:10] for k, v in ex.items())
+
+
+def test_reduce_to_8_when_short():
+    # 2027年3月は水曜5回・日曜4回の9枠 → 9件ずつだと81件で72件を超える
+    y, av = 2027, {}
+    for dd in range(1, 32):
+        d = date(y, 3, dd)
+        if d.weekday() == 2:
+            av[(d, "夜", "柔道")] = "○"
+        if d.weekday() == 6:
+            av[(d, "朝", "柔道")] = av[(d, "朝", "柔剣")] = av[(d, "夜", "柔道")] = "○"
+    r = alloc.make_plan(y, 3, av, list(range(1, 19)))
+    assert r["per_slot"] == 8 and not r["short"]
+    assert sum(len(v) for v in r["add"].values()) == 72
+    assert len(r["add"]["2027-03-07 0900-1200 柔剣"]) == 5 and len(r["add"]["2027-03-07 0900-1200"]) == 3
+
+
+def test_review_rates_and_actions_respect_rules():
+    W = lambda d: f"2027-01-{d:02d} 1800-2100"  # noqa: E731
+    M = lambda d: f"2027-01-{d:02d} 0900-1200"  # noqa: E731
+    cur = {W(6): list(range(1, 10)), W(13): list(range(10, 19)),
+           M(17): [14, 15, 16, 17], M(17) + " 柔剣": [1, 2, 3, 4, 5]}
+    groups = [{"g": W(6), "kind": "水曜夜"}, {"g": W(13), "kind": "水曜夜"}, {"g": M(17), "kind": "日曜朝"}]
+    r = alloc.review(groups, cur, {M(17): 3}, list(range(1, 19)))
+    row = {x["g"]: x for x in r["rows"]}
+    assert row[M(17)]["total"] == 12 and abs(row[M(17)]["rate"] - 0.75) < 1e-9
+    assert row[W(6)]["rate"] == 1.0
+    assert r["actions"] and r["after"] > r["before"]
+    # 案を全部実行しても、1IDは4件まで・同じ日に1件まで・各枠8件以上
+    after = {k: list(v) for k, v in cur.items()}
+    for a in r["actions"]:
+        if a["from"]:
+            after[a["from"]].remove(a["id"])
+        after.setdefault(a["to"], []).append(a["id"])
+    for i in range(1, 19):
+        mine = [k for k, v in after.items() if i in v]
+        assert len(mine) <= 4 and len({k[:10] for k in mine}) == len(mine)
+    for g in (W(6), W(13), M(17)):
+        assert sum(len(v) for k, v in after.items() if k[:20] == g) >= 8
+
+
+def test_review_plan_adds_first_moves_only_as_reference():
+    W = lambda d: f"2027-01-{d:02d} 1800-2100"  # noqa: E731
+    M = lambda d: f"2027-01-{d:02d} 0900-1200"  # noqa: E731
+    groups = [{"g": W(6), "kind": "水曜夜"}, {"g": W(13), "kind": "水曜夜"}, {"g": M(17), "kind": "日曜朝"}]
+    # 予備あり:追加だけで、取消の参考は出ない
+    cur = {W(6): list(range(1, 10)), W(13): list(range(10, 19)), M(17) + " 柔剣": [1, 2, 3, 4, 5, 14, 15, 16, 17]}
+    r = alloc.review_plan(groups, cur, {M(17): 3}, list(range(1, 19)))
+    assert r["adds"] and all(a["kind"] == "追加" for a in r["adds"]) and not r["moves_ref"]
+    # 予備なし(全IDが4件):追加は出ず、取消→申込が参考として出る
+    full = {W(6): list(range(1, 19)), W(13): list(range(1, 19)), M(17) + " 柔剣": list(range(1, 10)),
+            "2027-01-20 1800-2100": list(range(1, 19)), "2027-01-27 1800-2100": list(range(10, 19))}
+    r = alloc.review_plan(groups, full, {M(17): 6}, list(range(1, 19)))
+    assert r["spare_left"] == 0 and not r["adds"] and r["moves_ref"]
+    assert all(a["from"] for a in r["moves_ref"])
+
+
+if __name__ == "__main__":
+    for _n, _f in list(globals().items()):
+        if _n.startswith("test_") and callable(_f):
+            _f()
+    print("alloc ok")
