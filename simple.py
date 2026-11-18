@@ -56,12 +56,13 @@ def initial_plan(slots, ids, existing=None, order=None, cap=CAP):
     used = {i: len(existing.get(i, ())) for i in ids}
     days = {i: {k[:10] for k in existing.get(i, ())} for i in ids}
     plan, short = {}, []
-    for s in slots:
+    for no, s in enumerate(slots):
         have = [i for i in ids if any(k[:20] == s["g"] for k in existing.get(i, ()))]
         need = max(0, s["n"] - len(have))
         free = [i for i in order if used[i] < cap and s["date"] not in days[i]]
-        # 使い過ぎを避ける: 残りの多いIDから、同じなら登録の新しい順
-        free.sort(key=lambda i: (used[i], order.index(i)))
+        # 使い過ぎを避ける: 使った数の少ないIDから。同じなら、どの枠にも新しいIDと古いIDが混ざるように
+        # 登録順の 3つおき(1枠目: 1・4・7…番目、2枠目: 2・5・8…番目)に選ぶ
+        free.sort(key=lambda i: (used[i], (order.index(i) - no) % 3, order.index(i)))
         pick = free[:need]
         for i in pick:
             used[i] += 1
