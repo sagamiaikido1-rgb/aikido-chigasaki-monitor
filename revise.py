@@ -243,6 +243,12 @@ def main():
         if not any(x["g"] == g for x in groups):
             groups.append({"g": g, "kind": s[2]})
     others = others_by_group(groups, counts, current)
+    # 日曜朝で柔剣道場に申し込んでいないときは、剣道場だけの団体とは争わない(柔道場さえ取れればよい)。
+    # 柔道場を争う他団体だけを数える(2026-11-18 決定の保持方式。剣道場だけの数は保持分の判断で見る)
+    for x in groups:
+        g = x["g"]
+        if x["kind"] == "日曜朝" and not current.get(g + " 柔剣"):
+            others[g] = alloc.split_others(g, counts, current)[0]
     for x in groups:   # 画面の生の数(他団体の数え方を確かめるため)
         g = x["g"]
         print(f"[生の数] {g} 柔道場 抽選({counts.get(g, '-')}) 連盟{len(current.get(g, []))}"

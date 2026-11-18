@@ -60,3 +60,6 @@ print("hold ok")
 assert rg.needs_run({"actions": {"16": {"add": [G]}}, "status": "承認済み", "revision": 1})
 assert not rg.needs_run({"status": "承認済み", "revision": 1})
 print("needs_run ok")
+assert rg.hold_decisions({"hold_choice": {G: "kenjo"}}, holds) == {16: G + " 柔剣", 17: G + " 柔剣", 18: G + " 柔剣"}
+assert rg.hold_decisions({"hold_choice": {G: ""}}, holds) == {}
+print("hold_choice ok")

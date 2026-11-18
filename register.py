@@ -325,11 +325,14 @@ def hold_decisions(doc, holds):
     → {ID: 枠}(柔道場 "YYYY-MM-DD 0900-1200" か 柔剣道場 "... 柔剣")"""
     out = {}
     acts = (doc or {}).get("actions") or {}
+    choice = (doc or {}).get("hold_choice") or {}   # 管理画面の「柔道場に足す／柔剣道場に足す」{稽古枠: "judo"/"kenjo"}
     for g, ids in (holds or {}).items():
         for i in ids:
             for k in (acts.get(str(i)) or {}).get("add", []) or []:
                 if k in (g, g + " 柔剣"):
                     out[i] = k
+            if choice.get(g) in ("judo", "kenjo"):
+                out[i] = g + (" 柔剣" if choice[g] == "kenjo" else "")
     return out
 
 
