@@ -22,8 +22,14 @@ on:
         description: 新規IDの重み(1=ほかと同じ、1.5=1.5倍当たりやすいとみなす)
         default: "1.5"
       cap:
-        description: 1IDあたりの申込上限。空欄なら候補日を含む週の数
+        description: 1IDあたりの申込上限。空欄なら4件(総合体育館で1IDあたり4件)
         default: ""
+      slot_max:
+        description: 1枠に当方が申し込む最大件数(目安9件)
+        default: "9"
+      target_p:
+        description: 1枠の確保の見込みがここに届いたら、その枠にはもう足さない(0.9=90%。1にすると上限まで使い切る)
+        default: "0.9"
       send_mail:
         description: 1=Excelをメールで送る 0=送らない(テスト)
         default: "1"
@@ -64,6 +70,8 @@ jobs:
           EXCLUDE_IDS: ${{ github.event.inputs.exclude_ids }}
           NEW_WEIGHT: ${{ github.event.inputs.new_weight || '1.5' }}
           PLAN_CAP: ${{ github.event.inputs.cap }}
+          SLOT_MAX: ${{ github.event.inputs.slot_max || '9' }}
+          TARGET_P: ${{ github.event.inputs.target_p || '0.9' }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
         run: python plan.py
       - name: 申込案(ID番号と日付のみ)を保存
@@ -75,3 +83,4 @@ jobs:
           git add plan/*.json
           git commit -m "抽選申込案を保存" || exit 0
           git pull --rebase && git push
+          
