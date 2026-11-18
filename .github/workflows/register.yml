@@ -85,7 +85,7 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           REGISTER_MONTH: ${{ needs.check.outputs.month }}
           REPROCESS: ${{ github.event.inputs.reprocess || '0' }}
-          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'dry' }}   # 本番は設定 REGISTER_MODE=live(なければ確認のみ)
+          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'live' }}   # 2026-11-19 から本番。申込期間(1〜15日)の外は何もしない。止めるときは設定 REGISTER_MODE=dry
           TEST_ID: ${{ github.event.inputs.test_id }}
           TEST_LIMIT: ${{ github.event.inputs.test_limit }}
         run: python register.py run

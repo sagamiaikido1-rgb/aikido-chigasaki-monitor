@@ -525,6 +525,22 @@ def main():
                     if sk:
                         skipped_by[i] = sk
                     done_ok += 1
+                    # 最初の1IDだけは、申込一覧を読み直して正しく入ったか確かめてから次へ進む
+                    # (新しい仕組みが初めて本番で動くときに、誰も見ていなくても被害を1IDで止めるため)
+                    if live and done_ok == 1 and adds.get(i):
+                        now = {row_slot(r, y, m) for r in plan.read_lottery_only(browser, uid, pw, [(y, m)])
+                               if row_slot(r, y, m) and any(w in r["status"] for w in ACTIVE)}
+                        miss = [x for x in adds[i] if x not in now and x not in sk]
+                        if miss:
+                            apply_failed.append(i)
+                            print(f"::error::[止めました] ID{i} の申込が一覧に見当たりません({len(miss)}件)。残りのIDは申し込みません")
+                            try:
+                                lc.ca.send_mail(f"【合気道】{m}月分 抽選申込 至急: 最初のIDで確認できず止めました",
+                                                f"ID番号{i}で申し込んだはずの {len(miss)}件が、抽選申込一覧に見当たりません。\n"
+                                                "安全のため、残りのIDの申込は行っていません。管理者に連絡してください。")
+                            except Exception:
+                                pass
+                            break
                 except Exception as e:
                     done_ng += 1
                     apply_failed.append(i)

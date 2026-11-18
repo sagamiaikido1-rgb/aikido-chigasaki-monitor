@@ -27,7 +27,7 @@ on:
         description: 1=日付の決まりを無視して動かす(試験)
         default: "0"
       mode:
-        description: dry=確認のみ / live=本番(空欄なら設定 REGISTER_MODE、なければ確認のみ)
+        description: dry=確認のみ / live=本番(空欄なら設定 REGISTER_MODE、なければ本番。申込期間の外は何もしない)
         default: ""
       send_mail:
         description: 1=メールで送る 0=送らない(試験)
@@ -87,7 +87,7 @@ jobs:
           FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
           PLAN_MONTH: ${{ github.event.inputs.month }}
           FORCE: ${{ github.event.inputs.force || '0' }}
-          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'dry' }}
+          REGISTER_MODE: ${{ github.event.inputs.mode || vars.REGISTER_MODE || 'live' }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
           FORCE_MAIL: ${{ github.event.inputs.force_mail || '0' }}
         run: python flow.py ${{ steps.which.outputs.cmd }}
