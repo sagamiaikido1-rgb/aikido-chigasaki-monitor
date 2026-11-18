@@ -25,7 +25,6 @@ $LogFile = Join-Path $Home_ 'log.txt'
 # 上から順に頼む(同じ時刻なら上が先に動く)
 $Jobs = @(
   @{ Name='茅ヶ崎 抽選結果まとめ';       Wf='summary.yml';   Days=@(18);        Times=@('07:17'); CatchUp=24*12; Inputs=@{} }
-  @{ Name='茅ヶ崎 申込案づくり';         Wf='plan.yml';      Days=@(18);        Times=@('07:41'); CatchUp=24*12; Inputs=@{} }
   @{ Name='寒川 抽選結果まとめ';         Wf='samukawa.yml';  Days=@(15);        Times=@('07:17'); CatchUp=24*14; Inputs=@{} }
   @{ Name='平塚 抽選・予約まとめ';       Wf='hiratsuka.yml'; Days=@(2,11);      Times=@('07:17'); CatchUp=24*8;  Inputs=@{} }
   @{ Name='申込のお知らせ(1日)';        Wf='reminder.yml';  Days=@(1);         Times=@('08:00'); CatchUp=14;    Inputs=@{ force='0' } }
