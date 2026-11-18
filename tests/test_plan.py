@@ -64,3 +64,43 @@ print("closed ok")
 assert plan.month_cap(2026, 11) == 4 and plan.month_cap(2027, 1) == 4
 assert plan.cap_for((2027, 1), None, "2") == 2
 print("cap ok")
+
+# 1枠の上限・目標の見込みで止まる(使い切らない)
+slots = plan.candidate_slots(2027, 2)
+comp_list = [1.0] * len(slots)
+a3 = plan.allocate(slots, [1.1 if s[3] == "日曜朝" else 0.7 for s in slots], ids, 4, None, 9, 0.9)
+assert all(len(v) <= 9 for v in a3.values())
+assert sum(len(v) for v in a3.values()) < 18 * 4
+assert max(len(a3[s]) for s in range(len(slots)) if slots[s][3] == "水曜夜") <= 7
+print("slot ok", [len(a3[s]) for s in range(len(slots))])
+
+# 締切時点の実数(リポジトリに積み上がった分析)
+import tempfile, json as _j
+tmp = tempfile.mkdtemp()
+def snap(name, groups):
+    with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
+        _j.dump({"groups": groups}, f)
+G = {"g": "2027-01-17 0900-1200", "date": "2027-01-17", "kind": "日曜朝", "counts": {"柔道": 9, "柔剣": 12},
+     "ours": 9, "ours_ids": {"柔道": [12, 14, 16, 18], "柔剣": [1, 2, 3, 4, 5]}}
+W = {"g": "2027-01-06 1800-2100", "date": "2027-01-06", "kind": "水曜夜", "counts": {"柔道": 10},
+     "ours": 9, "ours_ids": {"柔道": list(range(1, 10)), "柔剣": []}}
+snap("2027-01_20261115-2206.json", [G, W])
+snap("2027-01_20261110-0100.json", [])                 # 古い方は使わない
+snap("2027-01_20261117-0100.json", [])                 # 締切(15日)より後は使わない
+snaps = plan.final_snapshots(tmp)
+assert list(snaps) == [(2027, 1)] and len(snaps[(2027, 1)]["groups"]) == 2
+st, det = plan.snapshot_stats(snaps, lambda ym: {("2027-01-17", "0900"): "柔道場"})
+assert st["日曜朝"]["judo_others"] == [0] and st["日曜朝"]["kendo_only"] == [3]
+assert abs(st["日曜朝"]["kenjo_share"][0] - 5 / 9) < 1e-9 and st["水曜夜"]["judo_others"] == [1]
+assert det[0]["result"] == "柔道場"
+cmb = plan.combine_competitors({"日曜朝": (1.1, 9, 8), "水曜夜": (0.7, 12, 11)}, st)
+assert cmb["日曜朝"][0] == 1.1 and cmb["水曜夜"][0] == 1.0
+ks, share, ck = plan.kenjo_suggestion(slots, a3, st)
+s0 = next(s for s in range(len(slots)) if slots[s][3] == "日曜朝")
+assert ks[s0][0] == round(len(a3[s0]) * 5 / 9) and ck == 3
+data, total = plan.build_workbook((2027, 1), slots, comp_list, a3, ids, {}, 4, comp, hist, per, set(), set(), 1.5,
+                                  (ks, share, ck), det, cmb)
+assert data[:2] == b"PK"
+j = plan.plan_json((2027, 1), slots, comp_list, a3, ids, 4, set(), set(), 1.5, ks)
+assert j["kenjo_suggest"]
+print("snapshot ok")
