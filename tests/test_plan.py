@@ -133,3 +133,10 @@ assert not any(k.endswith("保持") for k in j2["add"]) and len(j2["add"]["2027-
 assert any(s["key"] == "2027-01-10 1800-2100" and s["kind"] == "日曜夜" for s in j["slots"])
 import json as _json; _json.dumps(j)
 print("day1 json ok")
+
+# 申込期間の前(抽選(n)が1つもない)は、休館日だけ除いた仮の案
+av0 = {(date(2027, 2, 3), "夜", "柔道"): "×", (date(2027, 2, 7), "朝", "柔道"): "休館"}
+pv, is_pv = plan.preview_availability(av0, {})
+assert is_pv and pv[(date(2027, 2, 3), "夜", "柔道")] == "○" and pv[(date(2027, 2, 7), "朝", "柔道")] == "休館"
+assert plan.preview_availability(av0, {1: 2}) == (av0, False)
+print("preview ok")

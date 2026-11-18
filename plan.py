@@ -873,6 +873,14 @@ def availability(html_by_room, year, month):
     return avail, counts, diag
 
 
+def preview_availability(avail, counts):
+    """申込期間(1日〜)の前は、表に「抽選(n)」が1つも出ない(すべて×に見える)。
+    そのときは休館日だけを除き、ほかは空いているとみなした「仮の案」にする。→ (avail, 仮かどうか)"""
+    if counts:
+        return avail, False
+    return {k: (v if v == "休館" else "○") for k, v in avail.items()}, True
+
+
 # ---------------------------------------------------------------- 1日0時すぎの申込案(2026-11 決定の新しい作り方)
 
 def read_rooms(browser, uid, pw, year, month):
@@ -881,7 +889,7 @@ def read_rooms(browser, uid, pw, year, month):
             "柔剣": read_lottery_page(browser, uid, pw, year, month, "柔剣道場")}
 
 
-def day1_json(plan_ym, r, current, failed, sun_kendo, counts, sun_hold=None):
+def day1_json(plan_ym, r, current, failed, sun_kendo, counts, sun_hold=None, preview=False):
     """管理画面が読む1日の申込案(ID番号と日付だけ。団体名・ログインIDは含めない)。
     保持(日曜朝のうち1日には申し込まない分)は "add" に入れず "hold" {稽古枠: [ID]} に分ける。"""
     import alloc
@@ -897,6 +905,8 @@ def day1_json(plan_ym, r, current, failed, sun_kendo, counts, sun_hold=None):
         "current": {str(i): sorted(v) for i, v in current.items() if v},
         "add": {k: v for k, v in r["add"].items() if v and not k.endswith(" 保持")},
         "hold": hold,
+        # 申込期間の前に作った仮の案(休館日だけ除く)。1日0時すぎに空き状況を読んで作り直す。管理画面では確定できない
+        "preview": bool(preview),
         "short": [k for k, _n in r["short"]],
         "counts": {f"{d.isoformat()} {st}-{en}" + (" 柔剣" if room == "柔剣" else ""): n
                    for (d, st, en, room), n in counts.items()},
@@ -936,6 +946,9 @@ def day1_main(plan_ym):
     avail, counts, diag = availability(rooms, y, m)
     for line in diag:
         print(line)
+    avail, preview = preview_availability(avail, counts)
+    if preview:
+        print("[仮の案] 抽選(n)が1つも読めません(申込期間の前)。休館日だけを除いた仮の案を作ります")
     ids = [i for (i, _u, _p) in accounts if i not in failed]
     existing = {}
     for i, v in current.items():
@@ -946,7 +959,7 @@ def day1_main(plan_ym):
         print(f"[案] {s[0]} 目標{s[4]} 今{len(existing.get(s[0], []))} 追加{len(r['add'][s[0]])}")
     for d, k, w in r["skipped"]:
         print(f"[外した枠] {d} {k} {w}")
-    data = day1_json(plan_ym, r, current, failed, sun_kendo, counts, sun_hold)
+    data = day1_json(plan_ym, r, current, failed, sun_kendo, counts, sun_hold, preview)
     os.makedirs("plan", exist_ok=True)
     jpath = f"plan/day1_{y}-{m:02d}.json"
     with open(jpath, "w", encoding="utf-8") as f:
@@ -958,7 +971,9 @@ def day1_main(plan_ym):
     n_now = sum(len(v) for v in current.values())
     nk = min(sun_kendo, r['per_slot'])
     nh = min(sun_hold, r['per_slot'] - nk)
-    lines = [f"{y}年{m}月分 1日の申込案ができました。", "",
+    lines = ([f"{y}年{m}月分の【仮の申込案】です(申込期間の前のため、休館日だけを除いて作りました)。",
+              "1日0時すぎに空き状況(×・休館)を読んで作り直します。この仮の案は確定できません。", ""] if preview else
+             [f"{y}年{m}月分 1日の申込案ができました。", ""]) + [
              f"・申し込む枠: 日曜朝 {len({s[1] for s in r['slots'] if s[2] == '日曜朝'})}日、"
              f"日曜夜 {len([s for s in r['slots'] if s[2] == '日曜夜'])}日、水曜夜 {len([s for s in r['slots'] if s[2] == '水曜夜'])}日",
              f"・1枠 {r['per_slot']}件(日曜朝は柔道場 {r['per_slot'] - nk - nh}件"
@@ -979,7 +994,7 @@ def day1_main(plan_ym):
         lines.append("・読み取れなかったID(案から除外): " + "、".join(lc.who_label(i, names.get(i, "")) for i in failed))
     lines += ["", "管理画面「🗳 抽選申込」の「決める」画面で、枠ごとに「申し込む／見送る」を選んで確定してください。"]
     if os.environ.get("SEND_MAIL", "1") == "1":
-        lc.ca.send_mail(f"【合気道】{m}月分 1日の申込案(追加{n_add}件)", "\n".join(lines))
+        lc.ca.send_mail(f"【合気道】{m}月分 " + ("仮の申込案" if preview else "1日の申込案") + f"(追加{n_add}件)", "\n".join(lines))
         print("メールを送信しました。")
 
 
