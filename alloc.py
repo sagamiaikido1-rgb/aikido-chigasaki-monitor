@@ -5,8 +5,11 @@
 決まり(2026-11 代表のノウハウ)
   - 「×」(事前に行事が入っている)・「-」(受付なし)・休館 の枠は申し込まない
   - 日曜朝が柔道場・柔剣道場とも「×」の日は、日曜夜(柔道場)が空いていれば 1件だけ申し込む
-  - それ以外は 1枠に当方 9件。日曜朝は柔道場＋柔剣道場で合わせて9件
+  - それ以外は 1枠に当方 9件。日曜朝は柔道場＋柔剣道場＋保持で合わせて9件
   - 柔剣道場は日曜だけ使う(剣道場側を居合などの関連団体に回すため)
+  - 2026-11-18 決定: 日曜朝は柔道場6件で申し込み、3件は「保持」(IDだけ決めて申し込まない)。
+    10〜15日の件数を見て、代表が保持分を柔道場か柔剣道場に足す。15日22:30までに決まらなければ柔道場に足す
+    (剣道とは共存できないため、剣道場だけの申込が出たときに柔剣道場で部屋ごと押さえる受け皿)
   - 番号の大きいIDほど当たりやすい → 取りにくい枠ほど番号の大きいIDから入れる
   - 1IDあたり総合体育館で4件まで / 同じIDは1日1件まで
 
@@ -19,31 +22,40 @@ from datetime import date, timedelta
 
 PER_SLOT = 9            # 1枠あたりの当方の件数
 CAP = 4                 # 1IDあたりの上限(総合体育館)
-SUN_KENDO = 5           # 日曜朝9件のうち柔剣道場に回す件数(残りは柔道場)。変えられる(下の sun_kendo_from)
+SUN_KENDO = 0           # 日曜朝9件のうち、1日に柔剣道場で申し込む件数(2026-11-18 から 0)。変えられる(下の sun_kendo_from)
+SUN_HOLD = 3            # 日曜朝9件のうち、1日には申し込まず保持する件数(2026-11-18 決定)
 NG_MARKS = ("×", "-", "－", "休館")
 
 MORNING = ("0900", "1200")
 EVENING = ("1800", "2100")
 
 
+ROOM_SUFFIX = {"柔道": "", "柔剣": " 柔剣", "保持": " 保持"}
+
+
 def slot_key(d, start, end, room):
-    return f"{d.isoformat()} {start}-{end}" + (" 柔剣" if room == "柔剣" else "")
+    return f"{d.isoformat()} {start}-{end}" + ROOM_SUFFIX[room]
 
 
 def is_ok(mark):
     return mark is not None and not any(n in mark for n in NG_MARKS)
 
 
-def sun_kendo_from(value, per_slot=PER_SLOT):
+def sun_kendo_from(value, per_slot=PER_SLOT, default=SUN_KENDO):
     """日曜朝のうち柔剣道場に回す件数。管理画面・入力欄の値(空欄なら SUN_KENDO)を 0〜1枠の件数 に収める。"""
     try:
-        n = int(str(value).strip()) if str(value).strip() else SUN_KENDO
+        n = int(str(value).strip()) if str(value).strip() else default
     except ValueError:
-        n = SUN_KENDO
+        n = default
     return max(0, min(per_slot, n))
 
 
-def build_slots(year, month, avail, sun_kendo=SUN_KENDO, per_slot=PER_SLOT):
+def sun_hold_from(value, per_slot=PER_SLOT):
+    """日曜朝のうち保持する件数(空欄なら SUN_HOLD)。"""
+    return sun_kendo_from(value, per_slot, SUN_HOLD)
+
+
+def build_slots(year, month, avail, sun_kendo=SUN_KENDO, per_slot=PER_SLOT, sun_hold=SUN_HOLD):
     """avail: {(date, "朝"/"夜", "柔道"/"柔剣"): 記号}。読めなかった枠は None 扱い。
     → 申し込む枠のリスト [(key, date, 区分, 部屋, 件数, 難しさ)] と、外した枠の理由。"""
     slots, skipped = [], []
@@ -59,10 +71,14 @@ def build_slots(year, month, avail, sun_kendo=SUN_KENDO, per_slot=PER_SLOT):
             j, k = avail.get((d, "朝", "柔道")), avail.get((d, "朝", "柔剣"))
             if is_ok(j) or is_ok(k):
                 nk = (sun_kendo if is_ok(j) else per_slot) if is_ok(k) else 0
+                # 保持は柔道場が空いているときだけ(柔道場が×なら、受け皿の選びようがない)
+                nh = min(sun_hold, per_slot - nk) if is_ok(j) else 0
+                if nh:
+                    slots.append((slot_key(d, *MORNING, "保持"), d, "日曜朝", "保持", nh, 5))
                 if nk:
                     slots.append((slot_key(d, *MORNING, "柔剣"), d, "日曜朝", "柔剣", nk, 4))
-                if per_slot - nk:
-                    slots.append((slot_key(d, *MORNING, "柔道"), d, "日曜朝", "柔道", per_slot - nk, 3))
+                if per_slot - nk - nh:
+                    slots.append((slot_key(d, *MORNING, "柔道"), d, "日曜朝", "柔道", per_slot - nk - nh, 3))
             else:
                 reason = f"朝 柔道{j or '?'}・柔剣{k or '?'}"
                 n = avail.get((d, "夜", "柔道"))
@@ -95,7 +111,7 @@ def allocate(slots, ids, cap=CAP, existing=None):
     # 日曜朝は柔道場＋柔剣道場の合計で目標に合わせる(片方が多く入っていれば、もう片方を減らす)
     by_day = {}
     for s in slots:
-        if s[2] == "日曜朝":
+        if s[2] == "日曜朝" and s[3] != "保持":   # 保持はあとで申し込むので、今の申込との突き合わせには入れない
             by_day.setdefault(s[1], {})[s[3]] = s
     for d, rooms in by_day.items():
         target = sum(s[4] for s in rooms.values())
@@ -132,7 +148,7 @@ def allocate(slots, ids, cap=CAP, existing=None):
 
 
 def room_of(key):
-    return "柔剣" if key.endswith("柔剣") else "柔道"
+    return "柔剣" if key.endswith("柔剣") else "保持" if key.endswith("保持") else "柔道"
 
 
 def diff_report(slots, ids, existing, add, cap=CAP):
@@ -153,18 +169,20 @@ def diff_report(slots, ids, existing, add, cap=CAP):
         for key, lst in existing.items():
             if i in lst:
                 now[room_of(key)] += 1
-        plus = {"柔道": 0, "柔剣": 0}
+        plus = {"柔道": 0, "柔剣": 0, "保持": 0}
         for key, lst in add.items():
             if i in lst:
                 plus[room_of(key)] += 1
         used = now["柔道"] + now["柔剣"]
         id_rows.append({"id": i, "now_judo": now["柔道"], "now_kendo": now["柔剣"], "now": used,
                         "left": cap - used, "add_judo": plus["柔道"], "add_kendo": plus["柔剣"],
-                        "after_left": cap - used - plus["柔道"] - plus["柔剣"]})
+                        "hold": plus["保持"],
+                        "after_left": cap - used - plus["柔道"] - plus["柔剣"] - plus["保持"]})
     outside = {k: v for k, v in existing.items() if k not in keys and v}
     total = {"max": cap * len(ids), "now": sum(r["now"] for r in id_rows),
-             "add": sum(r["add_judo"] + r["add_kendo"] for r in id_rows)}
-    total["after_left"] = total["max"] - total["now"] - total["add"]
+             "add": sum(r["add_judo"] + r["add_kendo"] for r in id_rows),
+             "hold": sum(r["hold"] for r in id_rows)}
+    total["after_left"] = total["max"] - total["now"] - total["add"] - total["hold"]
     return {"slots": slot_rows, "ids": id_rows, "outside": outside, "total": total}
 
 
@@ -191,13 +209,13 @@ MIN_PER_SLOT = 8        # IDの残り件数が足りず目標に届かないと�
 
 
 def make_plan(year, month, avail, ids, existing=None, sun_kendo=SUN_KENDO,
-              per_slot=PER_SLOT, min_per_slot=MIN_PER_SLOT, cap=CAP):
+              per_slot=PER_SLOT, min_per_slot=MIN_PER_SLOT, cap=CAP, sun_hold=SUN_HOLD):
     """枠を作って割り振る。足りない枠が出たら、1枠の件数を 9 → 8 と下げて作り直す。
     日曜夜(1件)は下げない。日曜朝は柔剣道場の件数を保ち、柔道場の側を減らす。
     → dict(slots, skipped, add, remain, short, per_slot)"""
     n = per_slot
     while True:
-        slots, skipped = build_slots(year, month, avail, sun_kendo=min(sun_kendo, n), per_slot=n)
+        slots, skipped = build_slots(year, month, avail, sun_kendo=min(sun_kendo, n), per_slot=n, sun_hold=sun_hold)
         add, remain, short = allocate(slots, ids, cap=cap, existing=existing)
         if not short or n <= min_per_slot:
             return {"slots": slots, "skipped": skipped, "add": add, "remain": remain,
@@ -226,12 +244,14 @@ def win_rate(ours, others):
 
 
 def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_actions=REVIEW_MAX,
-           keep_floor=KEEP_FLOOR, sunday_room="柔剣", allow_add=True, allow_move=True):
+           keep_floor=KEEP_FLOOR, sunday_room="柔道", allow_add=True, allow_move=True, held=None):
     """groups:  [{"g": 稽古枠, "kind": "日曜朝"/"水曜夜"/"日曜夜"}]
     current: 今の連盟の申込 {枠(部屋付き): [ID番号]}
     others:  他団体の申込数 {稽古枠: 件数}(柔道場＋柔剣道場の合計)
+    held:    保持(まだ申し込んでいない) {稽古枠: [ID番号]}。そのIDの件数と日は使用済みとして数える(当選確率には入れない)
     → {"rows": 枠ごとの表, "actions": 案, "before": 合計, "after": 合計}"""
     assign = {k: list(v) for k, v in current.items()}
+    held = held or {}
     kinds = {x["g"]: x["kind"] for x in groups}
     floor = {g: (1 if k == "日曜夜" else keep_floor) for g, k in kinds.items()}
 
@@ -248,7 +268,7 @@ def review(groups, current, others, ids, cap=CAP, min_gain=REVIEW_MIN_GAIN, max_
     actions = []
     for _ in range(max_actions):
         used, days = defaultdict(int), defaultdict(set)
-        for k, v in assign.items():
+        for k, v in list(assign.items()) + list(held.items()):
             for i in v:
                 used[i] += 1
                 days[i].add(k[:10])
@@ -315,7 +335,7 @@ def review_plan(groups, current, others, ids, cap=CAP, **kw):
     first = review(groups, current, others, ids, cap=cap, allow_move=False, **kw)
     after_adds = apply_actions(current, first["actions"])
     ref = review(groups, after_adds, others, ids, cap=cap, allow_add=False, **kw)
-    spare = cap * len(ids) - sum(len(v) for v in after_adds.values())
+    spare = cap * len(ids) - sum(len(v) for v in after_adds.values()) - sum(len(v) for v in (kw.get("held") or {}).values())
     rows = first["rows"]
     after_all = apply_actions(after_adds, ref["actions"])
     for r in rows:
@@ -324,3 +344,54 @@ def review_plan(groups, current, others, ids, cap=CAP, **kw):
     return {"rows": rows, "adds": first["actions"], "moves_ref": ref["actions"],
             "before": first["before"], "after_adds": first["after"], "after_all": ref["after"],
             "spare_left": spare}
+
+
+# ---------------------------------------------------------------- 保持分(日曜朝)を柔道場・柔剣道場のどちらに足すか
+# 見立て(2026-11-18): 市のシステムは、その時間帯の申込を1列に並べて順に引き、
+# 必要な部屋がまだ空いている申込が取る(柔剣道場は柔道場と剣道場の両方が要る)。
+# 1月分の2回の結果(1/17 柔道場、1/31 柔剣道場)はこの見立てと合う。市の中身は分からないので目安。
+
+def secure_prob(judo, kenjo, judo_others, kendo_only):
+    """連盟が柔道場か柔剣道場のどちらかを取れる確率と、柔剣道場で取れる確率。
+    judo: 連盟の柔道場の件数、kenjo: 連盟の柔剣道場の件数、
+    judo_others: 柔道場を争う他団体(柔道場・柔剣道場への申込)、kendo_only: 剣道場だけの他団体
+    → (どちらかを取れる確率, 柔剣道場で取れる確率)"""
+    n = judo + kenjo + judo_others + kendo_only
+    if n == 0 or judo + kenjo == 0:
+        return 0.0, 0.0
+    p_kenjo = kenjo / n
+    p_judo = judo / n + (kendo_only / n) * (judo / (judo + judo_others) if judo + judo_others else 0.0)
+    return p_kenjo + p_judo, p_kenjo
+
+
+def split_others(g, counts, current):
+    """日曜朝の他団体を「柔道場を争う」「剣道場だけ」に分ける。
+    柔道場の抽選(n) = 柔道場＋柔剣道場への申込、柔剣道場の抽選(n) = その時間帯の全部。"""
+    nj, nk = counts.get(g, 0), counts.get(g + " 柔剣")
+    ours = len(current.get(g, [])) + len(current.get(g + " 柔剣", []))
+    judo_o = max(nj - ours, 0)
+    kendo_o = max(nk - nj, 0) if nk is not None else 0
+    return judo_o, kendo_o
+
+
+def hold_options(g, n_hold, counts, current):
+    """保持分を足す2案の確率。→ dict(柔道場に足す/柔剣道場に足す/今のまま)"""
+    j, k = len(current.get(g, [])), len(current.get(g + " 柔剣", []))
+    a, b = split_others(g, counts, current)
+    now = secure_prob(j, k, a, b)
+    to_j = secure_prob(j + n_hold, k, a, b)
+    to_k = secure_prob(j, k + n_hold, a, b)
+    return {"judo_others": a, "kendo_only": b,
+            "now": {"secure": round(now[0], 4), "kenjo": round(now[1], 4)},
+            "judo": {"secure": round(to_j[0], 4), "kenjo": round(to_j[1], 4)},
+            "kenjo": {"secure": round(to_k[0], 4), "kenjo": round(to_k[1], 4)}}
+
+
+def open_holds(hold, current):
+    """day1 の保持 {稽古枠: [ID]} のうち、まだその日に申し込んでいないID。→ {稽古枠: [ID]}"""
+    out = {}
+    for g, ids in (hold or {}).items():
+        left = [i for i in ids if not any(i in v and k[:10] == g[:10] for k, v in current.items())]
+        if left:
+            out[g] = sorted(left)
+    return out

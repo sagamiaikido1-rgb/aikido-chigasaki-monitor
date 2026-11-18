@@ -32,13 +32,29 @@ assert [m["kind"] for m in moves2] == ["add", "add"], moves2
 _, m3 = revise.improve({A: [1], B: [2], C: [3]}, {A: 0, B: 0, C: 0}, [1, 2, 3], 1, {})
 assert m3 == []
 print("revise ok")
-m = [{"kind": "move", "id": 1, "from": "a", "to": "b"}]
-assert revise.should_notify(None, m, 3, (2027, 1)) == (True, "修正案あり")
-assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, m, 4, (2027, 1)) == (False, "")
-assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, [], 5, (2027, 1)) == (True, "修正不要になりました")
-assert revise.should_notify({"year": 2027, "month": 1, "moves": []}, [], 6, (2027, 1)) == (False, "")
-assert revise.should_notify({"year": 2027, "month": 1, "moves": m}, m, 14, (2027, 1))[0]
-assert revise.should_notify({"year": 2026, "month": 12, "moves": m}, m, 3, (2027, 1)) == (True, "修正案あり")
+# 2026-11-18 決定: 1〜9日は送らない。10〜15日は他団体が増えた枠があるときだけ
+S, W_ = "2027-02-07 0900-1200", "2027-02-03 1800-2100"
+ym = (2027, 2)
+assert revise.should_notify(None, {S: 3, W_: 0}, 5, ym)[0] is False            # 9日までは記録だけ
+assert revise.should_notify(None, {S: 0, W_: 0}, 10, ym)[0] is False           # 競合なし
+ok, why, base = revise.should_notify(None, {S: 3, W_: 0}, 10, ym)              # 10日に競合あり → 送る
+assert ok and base == {S: 3, W_: 0}
+prev = {"year": 2027, "month": 2, "notified_others": base}
+assert revise.should_notify(prev, {S: 3, W_: 0}, 11, ym)[0] is False           # 同じ状況は繰り返さない
+assert revise.should_notify(prev, {S: 2, W_: 0}, 12, ym)[0] is False           # 減ったときも送らない
+ok, _w, base2 = revise.should_notify(prev, {S: 3, W_: 1}, 15, ym)              # 15日夜に水曜へ1件 → 送る
+assert ok and base2[W_] == 1
+assert revise.should_notify({"year": 2027, "month": 1, "notified_others": {S: 9}}, {S: 3}, 10, ym)[0]  # 前の月は基準にしない
+assert revise.should_notify(prev, {S: 3, W_: 0}, 3, ym, force=True)[0]
+# 保持分の確率(まだ申し込んでいない分だけ)
+rows = revise.hold_rows({S: [16, 17, 18]}, {S: 7, S + " 柔剣": 10}, {S: [10, 11, 12, 13, 14, 15]})
+assert len(rows) == 1 and rows[0]["ids"] == [16, 17, 18] and rows[0]["judo_others"] == 1 and rows[0]["kendo_only"] == 3
+assert revise.hold_rows({S: [16, 17, 18]}, {}, {S + " 柔剣": [16, 17, 18]}) == []
+import tempfile
+_d = tempfile.mkdtemp()
+revise.append_trend(ym, "2026-12-15 21:00", {S: 7}, {S: [1, 2]}, path_fmt=_d + "/t_{y}-{m:02d}.jsonl")
+revise.append_trend(ym, "2026-12-15 22:30", {S: 8}, {S: [1, 2]}, path_fmt=_d + "/t_{y}-{m:02d}.jsonl")
+assert len(open(_d + "/t_2027-02.jsonl", encoding="utf-8").read().splitlines()) == 2
 print("notify ok")
 
 # 新しい見直し:柔道場＋柔剣道場の合計で他団体を数える

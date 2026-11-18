@@ -110,18 +110,51 @@ def improve(assign, others, ids, cap, weights, min_gain=MIN_GAIN, max_moves=MAX_
     return assign, moves
 
 
-def should_notify(prev, moves_json, day, ym):
-    """メールを送るか。修正案が出た(または前回と変わった)とき、修正案が無くなったとき、
-    初日(1日)と締切前(14日・15日)の状況報告のときだけ送る。同じ修正案を毎日繰り返し送らない。"""
+NOTIFY_FROM_DAY = 10    # 2026-11-18 決定: 1〜9日は記録だけ。10〜15日は他団体の申込が増えたときだけメール
+
+
+def should_notify(prev, others, day, ym, force=False):
+    """メールを送るか(2026-11-18 決定)。
+    1〜9日は送らない(件数の記録だけ)。10〜15日は、前にメールを送ったとき(10日より前は 0件とみなす)より
+    他団体の申込が増えた枠があるときだけ送る。同じ状況を繰り返し送らない。
+    → (送るか, 理由, 次に比べる基準)"""
     same_month = bool(prev) and (prev.get("year"), prev.get("month")) == ym
-    prev_moves = prev.get("moves", []) if same_month else []
-    if day in (1, 14, 15):
-        return True, "状況報告"
-    if moves_json and moves_json != prev_moves:
-        return True, "修正案あり"
-    if not moves_json and prev_moves:
-        return True, "修正不要になりました"
-    return False, ""
+    base = (prev.get("notified_others") or {}) if same_month else {}
+    if force:
+        return True, "手動", dict(others)
+    if day < NOTIFY_FROM_DAY:
+        return False, "", base
+    up = [g for g, n in others.items() if n > base.get(g, 0)]
+    if up:
+        return True, f"競合あり {len(up)}枠", dict(others)
+    return False, "", base
+
+
+def load_holds(ym, path_fmt="plan/day1_{y}-{m:02d}.json"):
+    """1日の申込案で保持にした分 {稽古枠: [ID]}。ファイルが無ければ空。"""
+    try:
+        with open(path_fmt.format(y=ym[0], m=ym[1]), encoding="utf-8") as f:
+            return (json.load(f).get("hold") or {})
+    except (OSError, ValueError):
+        return {}
+
+
+def hold_rows(holds, counts, current):
+    """まだ申し込んでいない保持分ごとに、柔道場に足す/柔剣道場に足す の確率を並べる。"""
+    import alloc
+    rows = []
+    for g, ids in sorted(alloc.open_holds(holds, current).items()):
+        o = alloc.hold_options(g, len(ids), counts, current)
+        rows.append({"g": g, "ids": ids, **o})
+    return rows
+
+
+def append_trend(ym, at, counts, current, path_fmt="plan/trend_{y}-{m:02d}.jsonl"):
+    """件数の記録を1行ずつ足す(締切直前に何件くらい入るかを、月ごとに見られるように)。"""
+    line = {"at": at, "counts": counts,
+            "ours": {k: len(v) for k, v in current.items() if v}}
+    with open(path_fmt.format(y=ym[0], m=ym[1]), "a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
 def key_label(k):
@@ -145,7 +178,7 @@ def others_by_group(groups, counts, current):
     return out
 
 
-def review_json(ym, today, groups, current, others, res):
+def review_json(ym, today, groups, current, others, res, holds=None):
     def act(a):
         return {"kind": a["kind"], "id": a["id"], "from": a["from"], "to": a["to"], "gain": a["gain"]}
     return {
@@ -158,6 +191,8 @@ def review_json(ym, today, groups, current, others, res):
         "adds": [act(a) for a in res["adds"]],
         "moves_ref": [act(a) for a in res["moves_ref"]],
         "before": res["before"], "after_adds": res["after_adds"], "spare_left": res["spare_left"],
+        # 保持分(日曜朝): 柔道場/柔剣道場に足したときの確率。管理画面で代表が○×をつける
+        "holds": holds or [],
         # 前の形との互換(メールを送るかの判定に使う)
         "moves": [{"kind": a["kind"], "id": a["id"], "from": a["from"], "to": a["to"]} for a in res["adds"] + res["moves_ref"]],
     }
@@ -213,7 +248,10 @@ def main():
         print(f"[生の数] {g} 柔道場 抽選({counts.get(g, '-')}) 連盟{len(current.get(g, []))}"
               + (f" / 柔剣道場 抽選({counts.get(g + ' 柔剣', '-')}) 連盟{len(current.get(g + ' 柔剣', []))}" if x["kind"] == "日曜朝" else ""))
     ids = [i for (i, _u, _p) in accounts if i not in excluded and i not in failed]
-    res = alloc.review_plan(groups, current, others, ids)
+    holds = load_holds((year, month))
+    held = alloc.open_holds(holds, current)
+    res = alloc.review_plan(groups, current, others, ids, held=held)
+    hrows = hold_rows(holds, counts, current)
 
     who = lambda i: lc.who_label(i, names.get(i, ""))  # noqa: E731
 
@@ -238,6 +276,16 @@ def main():
         lines += ["", f"■ 参考:取消→申込 {len(res['moves_ref'])}件(追加ではこれ以上上げられないため。既定は見送り)"]
         for n, a in enumerate(res["moves_ref"], 1):
             lines.append(f"  {n}. {who(a['id'])}: {lab(a['from'])} を取消 → {lab(a['to'])} に申込")
+    if hrows:
+        lines += ["", f"■ 保持分(日曜朝)をどちらに足すか {len(hrows)}枠(代表のご判断をお願いします)",
+                  "  確保率 = 柔道場か柔剣道場のどちらかを取れる確率 / 柔剣道場率 = 部屋ごと(剣道場も)取れる確率"]
+        for h in hrows:
+            lines.append(f"  {lab(h['g'])[:-4]}  保持{len(h['ids'])}件({'、'.join(who(i) for i in h['ids'])})"
+                         f"  柔道場を争う他団体{h['judo_others']}・剣道場だけ{h['kendo_only']}")
+            lines.append(f"    柔道場に足す   : 確保率{h['judo']['secure']:.0%}・柔剣道場率{h['judo']['kenjo']:.0%}")
+            lines.append(f"    柔剣道場に足す : 確保率{h['kenjo']['secure']:.0%}・柔剣道場率{h['kenjo']['kenjo']:.0%}")
+        lines.append("  ※ 剣道場だけの申込には居合などの関連団体も含まれます。15日22:30までに決まらなければ柔道場に足します。")
+        lines.append("  ※ 確率は「市が全部の申込を1列に並べて順に引く」という見立てでの目安です。")
     lines += ["", "→ 管理画面「🗳 抽選申込」の「決める」画面で、1件ずつ「実行する／見送る」を選んで確定してください。"]
     outside = sorted(k for k in current if k[:20] not in {x["g"] for x in groups})
     if outside:
@@ -264,17 +312,24 @@ def main():
             prev = json.load(f)
     except Exception:
         prev = None
-    data = review_json((year, month), today, groups, current, others, res)
-    notify, why = should_notify(prev, data["moves"], today.day, (year, month))
+    data = review_json((year, month), today, groups, current, others, res, hrows)
+    notify, why, base = should_notify(prev, others, today.day, (year, month), os.environ.get("FORCE_MAIL", "0") == "1")
     data["notified"] = notify
+    data["notified_others"] = base
+    now = datetime.now(plan.JST).strftime("%Y-%m-%d %H:%M")
+    try:
+        append_trend((year, month), now, counts, current)
+    except OSError as e:
+        print(f"[注意] 件数の記録を残せませんでした({type(e).__name__})")
     for name in (f"plan/revise_{today.isoformat()}.json", "plan/revise_latest.json"):
         with open(name, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
     if not notify:
-        print("案は前回と同じため、メールは送りません(管理画面には表示されます)")
+        print("メールは送りません(1〜9日、または他団体の申込が増えていないため。管理画面には表示されます)")
     elif os.environ.get("SEND_MAIL", "1") == "1":
         n = len(res["adds"]) + len(res["moves_ref"])
-        subject = ("【訂正】" if note else "") + f"【合気道】{month}月分 抽選の見直し " + (f"案{n}件" if n else "案なし") + f"({today.month}/{today.day}・{why})"
+        subject = (("【訂正】" if note else "") + f"【合気道】{month}月分 抽選の見直し " + (f"案{n}件" if n else "案なし")
+                   + (f"・保持{len(hrows)}枠" if hrows else "") + f"({today.month}/{today.day}・{why})")
         lc.ca.send_mail(subject, body)
         print("メールを送信しました。")
 
