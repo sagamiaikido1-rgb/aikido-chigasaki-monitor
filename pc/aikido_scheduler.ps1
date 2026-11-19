@@ -31,6 +31,7 @@ $Jobs = @(
   @{ Name='抽選申込の登録(30分おき)';   Wf='register.yml';  Days=@(1..15 + 28..31); Times=@(0..23 | ForEach-Object { '{0:00}:11' -f $_; '{0:00}:41' -f $_ }); CatchUp=0.5; Inputs=@{} }
   @{ Name='抽選分析';                   Wf='analyze.yml';   Days=@();          Times=@('20:11'); CatchUp=6;     Inputs=@{} }
   @{ Name='申込案(1日)';                 Wf='flow.yml';      Days=@(1);         Times=@('00:05'); CatchUp=14;    Inputs=@{ cmd='plan' } }
+  @{ Name='仮の案(18日)';                Wf='flow.yml';      Days=@(18);        Times=@('12:00'); CatchUp=12;    Inputs=@{ cmd='plan' } }
   @{ Name='見込みの確認(毎日18時)';       Wf='flow.yml';      Days=@(2..15);     Times=@('18:00'); CatchUp=3;     Inputs=@{ cmd='check' } }
   @{ Name='見込みの確認(15日 9・15時)';   Wf='flow.yml';      Days=@(15);        Times=@('09:00','15:00'); CatchUp=1; Inputs=@{ cmd='check' } }
   @{ Name='未承認分の自動登録(15日21時)'; Wf='flow.yml';      Days=@(15);        Times=@('21:00'); CatchUp=1;     Inputs=@{ cmd='auto21' } }

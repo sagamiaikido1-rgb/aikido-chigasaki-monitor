@@ -29,7 +29,8 @@ def target_ym(today):
     ym = os.environ.get("PLAN_MONTH", "").strip()
     if ym:
         return ym
-    y, m = plan.add_months(today.year, today.month, 2)
+    # 1〜15日は申込中の月(2か月先)。16日以降は次の申込(翌月1日〜)の月 = 3か月先の仮の案
+    y, m = plan.add_months(today.year, today.month, 2 if today.day <= 15 else 3)
     return f"{y}-{m:02d}"
 
 
@@ -122,8 +123,10 @@ def ids_text(ids):
 def cmd_plan(today):
     import lottery_check as lc
     ym = target_ym(today)
-    if today.day != 1 and os.environ.get("FORCE", "0") != "1" and not os.environ.get("PLAN_MONTH"):
-        print("1日ではないので何もしません")
+    # 18日: 抽選結果が出たあと、次の申込の仮の案を作る(管理画面に出し、代表が前もって確定できる)
+    # 1日: 申込開始。空き状況を読み直して案を作り直す(確定済みの日はそのIDを引き継ぐ)
+    if today.day not in (1, 18) and os.environ.get("FORCE", "0") != "1" and not os.environ.get("PLAN_MONTH"):
+        print("1日・18日ではないので何もしません")
         return
     accounts = lc.load_accounts()
     avail, counts, current, failed, names = read_site(ym, accounts)
