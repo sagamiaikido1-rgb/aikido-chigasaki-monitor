@@ -68,6 +68,12 @@ RETAKE = ALL + "仮予約\n[20260013] 005001-1 予約\n寒川総合体育館 /�
 dr2 = sk.build_import_data([(5, sk.parse_cards(RETAKE))], 2027, 1, [], now)
 assert [(s["date"], s["start"]) for s in dr2["secured"]] == [("2027-01-09", "18:00")], dr2
 
+# 画面の上の方に状態の言葉(絞り込みの選択肢など)があっても、各申込の札を正しく読む
+NOISY = ("申込状況\nすべて\n予約\n抽選\n施設利用許可\n絞り込み\nすべての状態\n抽選待ち 当選 落選 当選確定 取消済み 本予約\n申込日最新順\n" + ALL)
+cn = sk.parse_cards(NOISY)
+assert [(c["kind"], c["status"]) for c in cn] == [("予約", "取消済み"), ("抽選", "当選確定")], cn
+assert sk.build_import_data([(5, cn)], 2027, 1, [], now)["secured"] == []
+
 # 全角のカッコ・ハイフンの違いがあっても読める
 c = sk.parse_cards("当選確定\n寒川総合体育館／武道場／武道場畳\n2027/2/6（土） 12:00－15:00")
 assert len(c) == 1 and c[0]["weekday"] == "土" and c[0]["end"] == "15:00" and sk.is_target(c[0]), c

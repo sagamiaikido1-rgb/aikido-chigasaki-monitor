@@ -71,11 +71,17 @@ def parse_cards(text: str):
     for m in CARD_DT.finditer(text or ""):
         seg = text[prev_end:m.start()]
         prev_end = m.end()
-        st = STATUS_RE.search(seg)
+        # 状態は、その申込の受付番号のすぐ前にある札(取消済み・当選確定など)を読む。
+        # 区切りの中には前の行や画面の飾り(絞り込みの選択肢など)も入りうるため、いちばん近いものを使う
+        nos = list(APP_NO_RE.finditer(seg))
+        no = nos[-1] if nos else None
+        head = seg[:no.start()] if no else seg
+        sts = list(STATUS_RE.finditer(head)) or list(STATUS_RE.finditer(seg))
+        st = sts[-1] if sts else None
+        kinds = list(KIND_RE.finditer(seg))
+        kind = kinds[-1] if kinds else None
         lines = [ln.strip() for ln in seg.splitlines() if ln.strip()]
         fac_lines = [ln for ln in lines if ("体育館" in ln or "武道場" in ln or "/" in ln) and not APP_NO_RE.search(ln)]
-        no = APP_NO_RE.search(seg)
-        kind = KIND_RE.search(seg)
         y, mo, d, wd, sh, sm, eh, em = m.groups()
         cards.append({
             "year": int(y), "month": int(mo), "day": int(d), "weekday": wd,
@@ -425,6 +431,8 @@ def main():
                 accounts_cards.append((i, cards))
                 hit = [c for c in cards if (c["year"], c["month"]) == (year, month) and is_target(c)]
                 print(f"[ID{i}] 抽選・予約 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜 {len(hit)}件)")
+                for c in sorted(hit, key=lambda c: (c["day"], c["start"], c["kind"])):   # 日付・種類・状態だけ(名前や番号は出さない)
+                    print(f"       {c['month']}/{c['day']} {c['start']} {c['kind']}:{c['status'] or '(状態なし)'}")
             except LoginFailed:
                 failed.append(i)
                 print(f"[エラー] ID{i} でログインできませんでした。利用者番号とパスワードを確かめてください(再試行はしません)")
