@@ -3,6 +3,12 @@ description: 自宅のWindowsパソコン(self-hosted)で、bash・Python・Play
 runs:
   using: composite
   steps:
+    - name: 前回の保存のやりかけを片付ける(途中で止まった git rebase が残っていると、以後の保存がすべて失敗するため)
+      shell: cmd
+      run: |
+        if exist .git\rebase-merge ( git rebase --abort 2>nul & rmdir /s /q .git\rebase-merge 2>nul & echo 途中で止まった保存のやりかけを片付けました )
+        if exist .git\rebase-apply ( git rebase --abort 2>nul & rmdir /s /q .git\rebase-apply 2>nul & echo 途中で止まった保存のやりかけを片付けました )
+        exit /b 0
     - name: Git付属の bash を使えるようにする
       shell: cmd
       run: echo C:\Program Files\Git\bin>>"%GITHUB_PATH%"

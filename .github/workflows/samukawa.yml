@@ -61,4 +61,5 @@ jobs:
           git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
           git add summary/samukawa/*.json
           git commit -m "寒川の抽選結果まとめ(取込用)を保存" || exit 0
-          git pull --rebase -X theirs && git push   # 同時に保存がぶつかったら、今回の(新しい)結果を優先
+          git pull --rebase -X theirs || { git rebase --abort; exit 1; }   # ぶつかったら今回の(新しい)結果を優先。だめなら、やりかけを残さず止める
+          git push

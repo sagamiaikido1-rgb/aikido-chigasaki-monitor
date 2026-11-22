@@ -87,6 +87,16 @@ dd = sk.build_import_data([(2, r2), (5, r5)], 2027, 1, [], now)
 assert [(s["date"], s["start"]) for s in dd["secured"]] == [("2027-01-09", "12:00")], dd
 assert dd["cancelled"] == [{"date": "2027-01-09", "start": "18:00", "end": "21:00"}] and dd["pending"] == [], dd
 
+# 受付番号も読めなかった場合(同じ枠の取消済みで判断する)
+def card3(st, d, t, fac="寒川総合体育館 /武道場 /武道場畳"):
+    return f"{st}\n{fac}\n{d}(土) {t} [申込] 11/15\n"
+N5 = sk.parse_cards(card3("取消済み", "2027/1/9", "18:00-21:00") + card3("当選確定", "2027/1/9", "18:00-21:00"))
+N2 = sk.parse_cards(card3("本予約", "2027/1/9", "12:00-15:00") + card3("当選確定", "2027/1/9", "12:00-15:00"))
+assert [c["no"] for c in N5 + N2] == [""] * 4
+dn = sk.build_import_data([(2, N2), (5, N5)], 2027, 1, [], now)
+assert [(s["date"], s["start"]) for s in dn["secured"]] == [("2027-01-09", "12:00")], dn
+assert dn["cancelled"] == [{"date": "2027-01-09", "start": "18:00", "end": "21:00"}], dn
+
 # 全角のカッコ・ハイフンの違いがあっても読める
 c = sk.parse_cards("当選確定\n寒川総合体育館／武道場／武道場畳\n2027/2/6（土） 12:00－15:00")
 assert len(c) == 1 and c[0]["weekday"] == "土" and c[0]["end"] == "15:00" and sk.is_target(c[0]), c
