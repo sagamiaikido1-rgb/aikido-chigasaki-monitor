@@ -76,6 +76,17 @@ cn = sk.parse_cards(NOISY)
 assert [(c["kind"], c["status"]) for c in cn] == [("予約", "取消済み"), ("抽選", "当選確定")], cn
 assert sk.build_import_data([(5, cn)], 2027, 1, [], now)["secured"] == []
 
+# 2026-11-22 の実際の読み取り: 種類のラベルが読めず、すべて「抽選」扱い。それでも 1/9 夜は取消、昼は本予約で確保
+def card2(st, no, d, t, fac="寒川総合体育館 /武道場 /武道場畳"):
+    return f"{st}\n[20260013] {no}\n{fac}\n{d}(土) {t} [申込] 11/15\n"
+REAL5 = card2("取消済み", "004992-1", "2027/1/9", "18:00-21:00") + card2("当選確定", "004992-1", "2027/1/9", "18:00-21:00")
+REAL2 = card2("本予約", "004694-1", "2027/1/9", "12:00-15:00") + card2("当選確定", "004694-1", "2027/1/9", "12:00-15:00")
+r5, r2 = sk.parse_cards(REAL5), sk.parse_cards(REAL2)
+assert [c["kind"] for c in r5 + r2] == ["抽選"] * 4
+dd = sk.build_import_data([(2, r2), (5, r5)], 2027, 1, [], now)
+assert [(s["date"], s["start"]) for s in dd["secured"]] == [("2027-01-09", "12:00")], dd
+assert dd["cancelled"] == [{"date": "2027-01-09", "start": "18:00", "end": "21:00"}] and dd["pending"] == [], dd
+
 # 全角のカッコ・ハイフンの違いがあっても読める
 c = sk.parse_cards("当選確定\n寒川総合体育館／武道場／武道場畳\n2027/2/6（土） 12:00－15:00")
 assert len(c) == 1 and c[0]["weekday"] == "土" and c[0]["end"] == "15:00" and sk.is_target(c[0]), c
