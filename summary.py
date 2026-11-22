@@ -124,7 +124,7 @@ def build_import_data(accounts_rows, year: int, month: int, failed):
     """管理画面の「抽選取込」タブ用。確保済み枠と全IDで落選した枠を、日付・時刻だけで返す。"""
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    secured, lost, pending = {}, set(), set()
+    secured, lost, pending, cancelled = {}, set(), set(), set()
     for _idx, rows in accounts_rows:
         for r, kind in zip(rows, effective_kinds(rows)):
             if (r["year"], r["month"]) != (year, month):
@@ -136,6 +136,8 @@ def build_import_data(accounts_rows, year: int, month: int, failed):
                 lost.add(key)
             elif kind == "抽選待ち":
                 pending.add(key)
+            elif kind == "取消":
+                cancelled.add(key)
 
     def slot(k):
         return {"date": date(k[0], k[1], k[2]).isoformat(),
@@ -151,6 +153,8 @@ def build_import_data(accounts_rows, year: int, month: int, failed):
         "lost": [slot(k) for k in sorted(lost) if k not in secured],
         # まだ抽選結果が出ていない枠(管理画面では変更しない)
         "pending": [slot(k) for k in sorted(pending) if k not in secured and k not in lost],
+        # 当選(または申込)のあとに取り消した枠。管理画面では取り消し線で表示し、HPに載っていれば削除候補にする
+        "cancelled": [slot(k) for k in sorted(cancelled) if k not in secured],
     }
 
 

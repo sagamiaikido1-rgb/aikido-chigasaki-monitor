@@ -118,7 +118,7 @@ def classify(status: str, kind: str = "抽選") -> str:
 
 def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
     """管理画面の「抽選取込」タブ用(茅ヶ崎と同じ形)。日付・時刻と施設名だけを入れる。"""
-    secured, lost, pending = {}, set(), set()
+    secured, lost, pending, cancelled = {}, set(), set(), set()
 
     def key_of(c):
         return (date(c["year"], c["month"], c["day"]).isoformat(), c["start"], c["end"])
@@ -141,6 +141,8 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
                 lost.add(key)
             elif kind in ("抽選待ち", "要確認", "その他"):
                 pending.add(key)
+            elif kind == "取消":
+                cancelled.add(key)
 
     def slot(k):
         return {"date": k[0], "start": k[1], "end": k[2]}
@@ -155,6 +157,8 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
         "secured": [dict(slot(k), facility=secured[k]) for k in sorted(secured)],
         "lost": [slot(k) for k in sorted(lost) if k not in secured],
         "pending": [slot(k) for k in sorted(pending) if k not in secured],
+        # 当選(または申込)のあとに取り消した枠。管理画面では取り消し線で表示し、HPに載っていれば削除候補にする
+        "cancelled": [slot(k) for k in sorted(cancelled) if k not in secured],
     }
 
 
