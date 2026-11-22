@@ -119,7 +119,7 @@ def classify(status: str, kind: str = "抽選") -> str:
     return "その他"
 
 
-def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
+def build_import_data(accounts_cards, year: int, month: int, failed, now=None, log=None):
     """管理画面の「抽選取込」タブ用(茅ヶ崎と同じ形)。日付・時刻と施設名だけを入れる。"""
     secured, lost, pending, cancelled = {}, set(), set(), set()
 
@@ -140,6 +140,10 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
             kind = classify(c["status"], c.get("kind", "抽選"))
             if kind == "当選" and (c["no"] in cancelled_nos or key in cancelled_slots) and key not in active:
                 kind = "取消"   # 当選後に窓口で取り消した(抽選の表示は「当選確定」のまま残る)
+            if log:   # 判定の理由(日付・時刻・状態だけ。名前や番号は出さない)
+                log(f"  [判定 ID{_idx}] {key[0]} {key[1]}-{key[2]} 状態:{c['status']!r} 種類:{c.get('kind')} → {kind}"
+                    f"(同じ枠の取消:{'あり' if key in cancelled_slots else 'なし'} / 生きている予約:{'あり' if key in active else 'なし'}"
+                    f" / 番号一致:{'あり' if c['no'] and c['no'] in cancelled_nos else 'なし'})")
             if kind in ("当選", "予約"):
                 secured.setdefault(key, c["facility"])
             elif kind == "落選":
@@ -451,7 +455,7 @@ def main():
                 print(f"[エラー] ID{i} の読み取りに失敗しました({type(e).__name__})")
         browser.close()
 
-    data = build_import_data(accounts_cards, year, month, failed)
+    data = build_import_data(accounts_cards, year, month, failed, log=print)
     print("\n" + build_report(data))
 
     os.makedirs(OUT_DIR, exist_ok=True)
