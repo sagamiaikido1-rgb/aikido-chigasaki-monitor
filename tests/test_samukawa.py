@@ -25,7 +25,7 @@ A3 = card("落選", "000021-1", "2027/1/2", "土") + card("抽選待ち", "00002
 c1 = sk.parse_cards(A1)
 assert len(c1) == 8, c1
 assert c1[0] == {"year": 2027, "month": 1, "day": 30, "weekday": "土", "start": "12:00", "end": "15:00",
-                 "status": "落選", "facility": "寒川総合体育館 /武道場 /武道場畳", "no": "000001-1"}, c1[0]
+                 "status": "落選", "facility": "寒川総合体育館 /武道場 /武道場畳", "no": "000001-1", "kind": "抽選"}, c1[0]
 assert c1[1]["status"] == "当選確定" and c1[4]["status"] == "当選"
 assert [sk.is_target(c) for c in c1] == [True, True, True, True, True, False, False, False]  # 日曜・床だけ・午前は対象外
 assert sk.is_target(dict(c1[0], start="18:00"))  # 土曜夜も対象
@@ -48,6 +48,25 @@ R1 = card("落選", "a", "2027/1/30", "土") + "".join(card("当選確定", "a",
 R2 = card("当選確定", "b", "2027/1/30", "土") + "".join(card("落選", "b", f"2027/1/{x}", "土") for x in (23, 16, 9))
 dr = sk.build_import_data([(1, sk.parse_cards(R1)), (2, sk.parse_cards(R2))], 2027, 1, [], now)
 assert [s["date"][-2:] for s in dr["secured"]] == ["09", "16", "23", "30"] and dr["lost"] == [], dr
+
+# 2026-11-22 の「すべて」タブ(寒川合気道連盟): 間違えて取った 1/9 夜を窓口で取消 →「予約」だけ取消済み、「抽選」は当選確定のまま
+ALL = ("3 件 うち 1 - 3 件目\n"
+       "取消済み\n[20260013] 004992-1 予約\n寒川総合体育館 /武道場 /武道場畳\n2027/1/9(土) 18:00-21:00 [申込] 11/15\n"
+       "当選確定\n[20260013] 004992-1 抽選\n寒川総合体育館 /武道場 /武道場畳\n2027/1/9(土) 18:00-21:00 [申込] 11/14\n"
+       "利用許可\n施設利用許可\n寒川総合体育館\n[申込] 10/24\n")
+ca = sk.parse_cards(ALL)
+assert [(c["kind"], c["status"], c["start"]) for c in ca] == [("予約", "取消済み", "18:00"), ("抽選", "当選確定", "18:00")], ca
+assert sk.total_count(ALL) == 3 and ALL.count("[申込]") == 3
+# 相模合気道連盟: 1/9 昼は 当選確定 + 本予約(支払済み)
+SAGAMI = ("本予約\n[20260013] 004694-1 予約\n寒川総合体育館 /武道場 /武道場畳\n2027/1/9(土) 12:00-15:00 [申込] 11/15\n"
+          "当選確定\n[20260013] 004694-1 抽選\n寒川総合体育館 /武道場 /武道場畳\n2027/1/9(土) 12:00-15:00 [申込] 11/7\n")
+dc = sk.build_import_data([(1, sk.parse_cards(SAGAMI)), (5, ca)], 2027, 1, [], now)
+assert [(s["date"], s["start"]) for s in dc["secured"]] == [("2027-01-09", "12:00")], dc   # 夜は取消なので入らない
+assert dc["lost"] == [] and dc["pending"] == []
+# 取消のあとに同じ枠を窓口で取り直した場合(生きている予約がある)は確保のまま
+RETAKE = ALL + "仮予約\n[20260013] 005001-1 予約\n寒川総合体育館 /武道場 /武道場畳\n2027/1/9(土) 18:00-21:00 [申込] 11/20\n"
+dr2 = sk.build_import_data([(5, sk.parse_cards(RETAKE))], 2027, 1, [], now)
+assert [(s["date"], s["start"]) for s in dr2["secured"]] == [("2027-01-09", "18:00")], dr2
 
 # 全角のカッコ・ハイフンの違いがあっても読める
 c = sk.parse_cards("当選確定\n寒川総合体育館／武道場／武道場畳\n2027/2/6（土） 12:00－15:00")
