@@ -130,13 +130,15 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
         # このIDで「予約」が取消済みになった受付番号と、まだ生きている予約の枠
         # 取消済みになった受付番号(種類のラベルが読めなくても、同じ番号の当選は取り消されたと分かる)
         cancelled_nos = {c["no"] for c in cards if c["no"] and classify(c["status"], c.get("kind", "抽選")) == "取消"}
+        # 受付番号が文字として読めないこともあるため、同じIDの同じ枠に取消済みがあれば、それでも取消とみなす
+        cancelled_slots = {key_of(c) for c in cards if classify(c["status"], c.get("kind", "抽選")) == "取消"}
         active = {key_of(c) for c in cards if classify(c["status"], c.get("kind", "抽選")) == "予約"}
         for c in cards:
             if (c["year"], c["month"]) != (year, month) or not is_target(c):
                 continue
             key = key_of(c)
             kind = classify(c["status"], c.get("kind", "抽選"))
-            if kind == "当選" and c["no"] in cancelled_nos and key not in active:
+            if kind == "当選" and (c["no"] in cancelled_nos or key in cancelled_slots) and key not in active:
                 kind = "取消"   # 当選後に窓口で取り消した(抽選の表示は「当選確定」のまま残る)
             if kind in ("当選", "予約"):
                 secured.setdefault(key, c["facility"])
@@ -439,7 +441,8 @@ def main():
                 hit = [c for c in cards if (c["year"], c["month"]) == (year, month) and is_target(c)]
                 print(f"[ID{i}] 抽選・予約 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜 {len(hit)}件)")
                 for c in sorted(hit, key=lambda c: (c["day"], c["start"], c["kind"])):   # 日付・種類・状態だけ(名前や番号は出さない)
-                    print(f"       {c['month']}/{c['day']} {c['start']} {c['kind']}:{c['status'] or '(状態なし)'}")
+                    print(f"       {c['month']}/{c['day']} {c['start']} {c['kind']}:{c['status'] or '(状態なし)'}"
+                          f"{'' if c['no'] else ' (受付番号は読めず)'}")
             except LoginFailed:
                 failed.append(i)
                 print(f"[エラー] ID{i} でログインできませんでした。利用者番号とパスワードを確かめてください(再試行はしません)")
