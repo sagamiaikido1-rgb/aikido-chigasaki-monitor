@@ -48,18 +48,23 @@ CARD_DT = re.compile(
     r"(\d{4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})\s*[(（]\s*([日月火水木金土])[^)）]*[)）]\s*"
     r"(\d{1,2})\s*:\s*(\d{2})\s*[-〜~－–ー]\s*(\d{1,2})\s*:\s*(\d{2})"
 )
-STATUS_RE = re.compile(r"当選確定|補欠当選|抽選待ち|取消済み?|取り?消し|キャンセル|落選|当選")
+STATUS_RE = re.compile(r"当選確定|補欠当選|抽選待ち|取消済み?|取り?消し|キャンセル|落選|当選|本予約|仮予約")
 APP_NO_RE = re.compile(r"\[\s*\d+\s*\]\s*([\d-]+)")
+# 受付番号の後ろにある種類(「抽選」の申込か、当選後にできる「予約」か)
+KIND_RE = re.compile(r"\[\s*\d+\s*\]\s*[\d-]+\s*(抽選|予約)")
 
 
 def parse_cards(text: str):
-    """「申込状況」→「抽選」タブの画面の文字から、申込1件ずつの情報を取り出す。
+    """「申込状況」→「すべて」タブの画面の文字から、申込1件ずつの情報を取り出す。
 
     1件の表示例:
       落選 [20260013] 004697-1 抽選
       寒川総合体育館 /武道場 /武道場畳
       2027/1/30(土) 12:00-15:00 [申込] 11/7
-    日付・時刻の行を目印にして、その前(前の申込の日付の後ろから)にある状態と施設名を読む。
+    当選すると同じ受付番号の「予約」もでき、窓口で取り消すと「予約」の方だけが「取消済み」になる
+    (「抽選」の方は「当選確定」のまま残る。2026-11-22 の画面で確認)。
+    日付・時刻の行を目印にして、その前(前の申込の日付の後ろから)にある状態・種類・施設名を読む。
+    日付のない「施設利用許可」の行は読み飛ばす。
     """
     cards = []
     prev_end = 0
@@ -70,6 +75,7 @@ def parse_cards(text: str):
         lines = [ln.strip() for ln in seg.splitlines() if ln.strip()]
         fac_lines = [ln for ln in lines if ("体育館" in ln or "武道場" in ln or "/" in ln) and not APP_NO_RE.search(ln)]
         no = APP_NO_RE.search(seg)
+        kind = KIND_RE.search(seg)
         y, mo, d, wd, sh, sm, eh, em = m.groups()
         cards.append({
             "year": int(y), "month": int(mo), "day": int(d), "weekday": wd,
@@ -77,6 +83,7 @@ def parse_cards(text: str):
             "status": st.group(0) if st else "",
             "facility": re.sub(r"\s+", " ", fac_lines[-1]) if fac_lines else "",
             "no": no.group(1) if no else "",
+            "kind": kind.group(1) if kind else "抽選",
         })
     return cards
 
@@ -87,7 +94,9 @@ def is_target(c) -> bool:
             and c["weekday"] == TARGET_WEEKDAY and c["start"] in TARGET_STARTS)
 
 
-def classify(status: str) -> str:
+def classify(status: str, kind: str = "抽選") -> str:
+    if kind == "予約":   # 当選後にできる予約(または窓口で取った予約)
+        return "取消" if any(w in status for w in ("取消", "取り消", "キャンセル")) else "予約"
     if "補欠" in status:
         return "要確認"
     if any(w in status for w in ("取消", "取り消", "キャンセル")):
@@ -104,13 +113,23 @@ def classify(status: str) -> str:
 def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
     """管理画面の「抽選取込」タブ用(茅ヶ崎と同じ形)。日付・時刻と施設名だけを入れる。"""
     secured, lost, pending = {}, set(), set()
+
+    def key_of(c):
+        return (date(c["year"], c["month"], c["day"]).isoformat(), c["start"], c["end"])
+
     for _idx, cards in accounts_cards:
+        # このIDで「予約」が取消済みになった受付番号と、まだ生きている予約の枠
+        cancelled_nos = {c["no"] for c in cards if c["no"] and classify(c["status"], c.get("kind", "抽選")) == "取消"
+                         and c.get("kind") == "予約"}
+        active = {key_of(c) for c in cards if classify(c["status"], c.get("kind", "抽選")) == "予約"}
         for c in cards:
             if (c["year"], c["month"]) != (year, month) or not is_target(c):
                 continue
-            key = (date(c["year"], c["month"], c["day"]).isoformat(), c["start"], c["end"])
-            kind = classify(c["status"])
-            if kind == "当選":
+            key = key_of(c)
+            kind = classify(c["status"], c.get("kind", "抽選"))
+            if kind == "当選" and c["no"] in cancelled_nos and key not in active:
+                kind = "取消"   # 当選後に窓口で取り消した(抽選の表示は「当選確定」のまま残る)
+            if kind in ("当選", "予約"):
                 secured.setdefault(key, c["facility"])
             elif kind == "落選":
                 lost.add(key)
@@ -230,8 +249,9 @@ def open_lottery_list(page):
         if not _click_text(page, "申込状況", exact=False, timeout=10000):
             raise RuntimeError("「申込状況」が見つかりません")
     page.wait_for_timeout(2500)
-    if not _click_text(page, "抽選", exact=True, timeout=10000):
-        raise RuntimeError("「抽選」タブが見つかりません")
+    # 取消は「予約」の方にだけ出るため、抽選と予約の両方が並ぶ「すべて」タブを読む
+    if not _click_text(page, "すべて", exact=True, timeout=10000):
+        raise RuntimeError("「すべて」タブが見つかりません")
     page.wait_for_timeout(2500)
     # 表示件数を多くする(できなければ10件ずつのまま、ページを順に読む)
     try:
@@ -293,9 +313,10 @@ def _next_page(page, n) -> bool:
 def read_all_pages(page, max_pages=15):
     cards, seen = [], set()
     total = None
+    entries = 0   # 読んだページの件数([申込] の数。日付のない「施設利用許可」も1件と数える)
     for n in range(1, max_pages + 1):
         if n > 1:
-            if total is not None and len(cards) >= total:
+            if total is not None and entries >= total:
                 break
             if not _next_page(page, n):
                 break
@@ -303,8 +324,9 @@ def read_all_pages(page, max_pages=15):
         if total is None:
             total = total_count(text)
         new = 0
+        page_entries = text.count("[申込]")
         for c in parse_cards(text):
-            k = (c["no"], c["year"], c["month"], c["day"], c["start"], c["facility"], c["status"])
+            k = (c["no"], c["kind"], c["year"], c["month"], c["day"], c["start"], c["facility"], c["status"])
             if k in seen:
                 continue
             seen.add(k)
@@ -312,8 +334,9 @@ def read_all_pages(page, max_pages=15):
             new += 1
         if n > 1 and new == 0:
             break
-    if total is not None and len(cards) < total:
-        print(f"[注意] 画面の件数 {total}件のうち {len(cards)}件しか読めませんでした(ページ送りを確認)")
+        entries += page_entries
+    if total is not None and entries < total:
+        print(f"[注意] 画面の件数 {total}件のうち {entries}件しか読めませんでした(ページ送りを確認)")
         show_labels(page)
     return cards
 
@@ -401,7 +424,7 @@ def main():
                 names[i] = name
                 accounts_cards.append((i, cards))
                 hit = [c for c in cards if (c["year"], c["month"]) == (year, month) and is_target(c)]
-                print(f"[ID{i}] 抽選申込 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜 {len(hit)}件)")
+                print(f"[ID{i}] 抽選・予約 {len(cards)}件を読み取り(うち対象月の武道場畳・土曜 {len(hit)}件)")
             except LoginFailed:
                 failed.append(i)
                 print(f"[エラー] ID{i} でログインできませんでした。利用者番号とパスワードを確かめてください(再試行はしません)")

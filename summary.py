@@ -40,16 +40,25 @@ def classify(status: str) -> str:
     return "その他"
 
 
+def effective_kinds(rows):
+    """1つのIDの行ごとの種類。当選のあとに同じ枠の予約を取り消した場合(抽選の一覧に「当選」が残っても)は「取消」として扱う。
+    同じ枠に生きている予約があれば(取り直しなど)確保のまま。"""
+    kinds = [classify(r["status"]) for r in rows]
+    cancelled = {lc.slot_key(r) for r, k in zip(rows, kinds) if k == "取消"}
+    booked = {lc.slot_key(r) for r, k in zip(rows, kinds) if k == "予約"}
+    return [("取消" if k == "当選" and lc.slot_key(r) in cancelled and lc.slot_key(r) not in booked else k)
+            for r, k in zip(rows, kinds)]
+
+
 def build_report(accounts_rows, year: int, month: int, who=None):
     """accounts_rows: [(ID番号, 行のリスト)] → (本文, CSV行のリスト)
     確保済み = 抽選で当選した枠 + 予約申込一覧にある枠(手動で予約した分を含む)。同じ枠は1つにまとめる。"""
     secured = {}  # 枠 -> {"fac": 施設, "via": {"当選","予約"}, "ids": {ID番号}}
     lost, pending, cancelled, others = {}, 0, [], []
     for idx, rows in accounts_rows:
-        for r in rows:
+        for r, kind in zip(rows, effective_kinds(rows)):
             if (r["year"], r["month"]) != (year, month):
                 continue
-            kind = classify(r["status"])
             key = lc.slot_key(r)
             if kind in ("当選", "予約"):
                 e = secured.setdefault(key, {"fac": r["facility"], "via": set(), "ids": set()})
@@ -117,10 +126,9 @@ def build_import_data(accounts_rows, year: int, month: int, failed):
     from zoneinfo import ZoneInfo
     secured, lost, pending = {}, set(), set()
     for _idx, rows in accounts_rows:
-        for r in rows:
+        for r, kind in zip(rows, effective_kinds(rows)):
             if (r["year"], r["month"]) != (year, month):
                 continue
-            kind = classify(r["status"])
             key = lc.slot_key(r)
             if kind in ("当選", "予約"):
                 secured.setdefault(key, r["facility"])
