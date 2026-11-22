@@ -2,7 +2,7 @@
  "dojo": "寒川",
  "year": 2027,
  "month": 1,
- "generated_at": "2026-11-22 09:30",
+ "generated_at": "2026-11-22 12:44",
  "failed_ids": [],
  "secured": [
   {
@@ -37,5 +37,6 @@
   }
  ],
  "lost": [],
- "pending": []
+ "pending": [],
+ "cancelled": []
 }
