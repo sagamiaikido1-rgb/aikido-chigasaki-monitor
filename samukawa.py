@@ -103,6 +103,9 @@ def is_target(c) -> bool:
 def classify(status: str, kind: str = "抽選") -> str:
     if kind == "予約":   # 当選後にできる予約(または窓口で取った予約)
         return "取消" if any(w in status for w in ("取消", "取り消", "キャンセル")) else "予約"
+    # 種類のラベル(抽選/予約)は画面の文字として読めないことがある(2026-11-22 の実行で確認)ため、状態の言葉でも見分ける
+    if ("本予約" in status or "仮予約" in status) and not any(w in status for w in ("取消", "取り消", "キャンセル")):
+        return "予約"
     if "補欠" in status:
         return "要確認"
     if any(w in status for w in ("取消", "取り消", "キャンセル")):
@@ -125,8 +128,8 @@ def build_import_data(accounts_cards, year: int, month: int, failed, now=None):
 
     for _idx, cards in accounts_cards:
         # このIDで「予約」が取消済みになった受付番号と、まだ生きている予約の枠
-        cancelled_nos = {c["no"] for c in cards if c["no"] and classify(c["status"], c.get("kind", "抽選")) == "取消"
-                         and c.get("kind") == "予約"}
+        # 取消済みになった受付番号(種類のラベルが読めなくても、同じ番号の当選は取り消されたと分かる)
+        cancelled_nos = {c["no"] for c in cards if c["no"] and classify(c["status"], c.get("kind", "抽選")) == "取消"}
         active = {key_of(c) for c in cards if classify(c["status"], c.get("kind", "抽選")) == "予約"}
         for c in cards:
             if (c["year"], c["month"]) != (year, month) or not is_target(c):
