@@ -4,8 +4,9 @@ permissions:
   contents: write   # IDごとの記録を保存するため
 
 on:
-  schedule:
-    - cron: "11,41 * 1-15,28-31 * *"   # 30分おきに管理画面の確定を確認(申込期間の前後のみ)
+  # 決まった時刻の実行は、自宅パソコンの「AikidoScheduler」(pc/aikido_scheduler.ps1)が頼む。
+  # GitHub の時刻実行は何時間も遅れたり捨てられたりするため使わない。以前の設定:
+  # - cron: "11,41 * 1-15,28-31 * *"   # 30分おきに管理画面の確定を確認(申込期間の前後のみ)
   workflow_dispatch:
     inputs:
       month:
@@ -15,8 +16,8 @@ on:
         description: 1=処理済みの確定ももう一度処理する(代表の押し直し不要)
         default: "0"
       mode:
-        description: dry=確認のみ / stop=テスト(「同意して申し込む」の手前で止める) / live=本番
-        default: "dry"
+        description: dry=確認のみ / stop=テスト(「同意して申し込む」の手前で止める) / live=本番 / 空欄=いつも通り(設定 REGISTER_MODE、なければ本番)
+        default: ""   # 自宅パソコンからの時刻実行は何も指定せずに頼むため、空欄=いつも通り にしておく(dry だと時刻実行が確認だけになってしまう)
       test_id:
         description: テスト用。このID番号だけ処理する(空欄なら全ID)
         default: ""
