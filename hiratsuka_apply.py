@@ -67,7 +67,8 @@ _CELL_JS = """([md, start]) => {
     el.click();
     return {ok: true, text: txt, kind: kind};
   }
-  return {ok: false, why: 'その日付の行が見つかりません'};
+  const seen = rows.map(tr => [...tr.children].slice(0, 3).map(c => norm(c.innerText).slice(0, 14)).join('|')).filter(Boolean).slice(0, 25);
+  return {ok: false, why: 'その日付の行が見つかりません', seen: seen, times: times};
 }"""
 
 
@@ -87,6 +88,7 @@ def dry_run(page, year, month, day, start):
     md = f"{month:02d}/{day:02d}"
     res = page.evaluate(_CELL_JS, [md, start])
     if not res.get("ok"):
+        print("[診断] 表の行:", res.get("seen"), "/ 時間:", res.get("times"))
         raise RuntimeError(f"枠を選べませんでした: {res.get('why')}")
     print(f"[試験] 枠 {md} {start} を選びました(表示: {res.get('text')!r} / 部品: {res.get('kind')})")
     page.wait_for_timeout(3000)
