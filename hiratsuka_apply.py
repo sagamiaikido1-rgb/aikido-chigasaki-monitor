@@ -64,8 +64,9 @@ _CELL_JS = """([md, start]) => {
     const txt = norm(cell.innerText);
     const el = cell.querySelector('a, input, button') || cell;
     const kind = el.tagName.toLowerCase();
-    el.click();
-    return {ok: true, text: txt, kind: kind};
+    el.setAttribute('data-pick', '1');
+    const html = el.outerHTML.replace(/\d{5,}/g, '#').slice(0, 160);
+    return {ok: true, text: txt, kind: kind, html: html};
   }
   const seen = rows.map(tr => [...tr.children].slice(0, 3).map(c => norm(c.innerText).slice(0, 14)).join('|')).filter(Boolean).slice(0, 25);
   return {ok: false, why: 'その日付の行が見つかりません', seen: seen, times: times};
@@ -90,8 +91,15 @@ def dry_run(page, year, month, day, start):
     if not res.get("ok"):
         print("[診断] 表の行:", res.get("seen"), "/ 時間:", res.get("times"))
         raise RuntimeError(f"枠を選べませんでした: {res.get('why')}")
-    print(f"[試験] 枠 {md} {start} を選びました(表示: {res.get('text')!r} / 部品: {res.get('kind')})")
-    page.wait_for_timeout(3000)
+    print(f"[試験] 枠 {md} {start} を見つけました(表示: {res.get('text')!r} / 部品: {res.get('html')})")
+    ctx = page.context
+    before = len(ctx.pages)
+    page.locator("[data-pick='1']").first.click(timeout=8000)
+    page.wait_for_timeout(3500)
+    if len(ctx.pages) > before:
+        page = ctx.pages[-1]
+        page.wait_for_load_state("domcontentloaded")
+        print("[試験] 別の画面(ウィンドウ)が開きました")
     print("[試験] 画面:", headings(page))
     body = ht.norm(page.inner_text("body")).replace(" ", "")
     if "申込内容設定" not in body and "利用目的" not in body:
