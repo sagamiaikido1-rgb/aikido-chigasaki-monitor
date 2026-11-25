@@ -237,7 +237,10 @@ def _set_start_date(page, year: int, month: int):
 
 def read_counts(page, year: int, month: int):
     """ログイン済みの画面から、施設別抽選申込状況の件数表を読む。"""
-    ht.go_user_page(page)
+    # 一覧の画面にも「抽選申込内容」の文字があるため、必ず利用者専用ページへ戻ってから進む
+    if not ht._click_any(page, ["利用者専用ページ", "利用者ページへ"], timeout=8000):
+        raise RuntimeError("利用者専用ページへ戻れません")
+    page.wait_for_timeout(2500)
     if not _click(page, ["抽選申込"], timeout=10000, exclude=("内容", "確認", "削除")):
         raise RuntimeError("「抽選申込」が見つかりません")
     page.wait_for_timeout(2500)
