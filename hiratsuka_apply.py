@@ -65,7 +65,7 @@ _CELL_JS = """([md, start]) => {
     const el = cell.querySelector('a, input, button') || cell;
     const kind = el.tagName.toLowerCase();
     el.setAttribute('data-pick', '1');
-    const html = el.outerHTML.replace(/\d{5,}/g, '#').slice(0, 160);
+    const html = el.outerHTML.replace(/\\d{5,}/g, '#').slice(0, 160);
     return {ok: true, text: txt, kind: kind, html: html};
   }
   const seen = rows.map(tr => [...tr.children].slice(0, 3).map(c => norm(c.innerText).slice(0, 14)).join('|')).filter(Boolean).slice(0, 25);
