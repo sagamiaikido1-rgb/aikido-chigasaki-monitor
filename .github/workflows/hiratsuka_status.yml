@@ -13,6 +13,9 @@ on:
       send_mail:
         description: 1=結果をメールでも送る 0=ログだけ
         default: "1"
+      debug:
+        description: 1=件数の表の読み取りの様子もログに出す
+        default: "0"
 
 concurrency:
   group: hiratsuka-status
@@ -50,4 +53,5 @@ jobs:
           HIRATSUKA_ACCOUNTS: ${{ secrets.HIRATSUKA_ACCOUNTS }}
           SUMMARY_MONTH: ${{ github.event.inputs.month }}
           SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+          DEBUG_TABLE: ${{ github.event.inputs.debug || '0' }}
         run: python hiratsuka_status.py

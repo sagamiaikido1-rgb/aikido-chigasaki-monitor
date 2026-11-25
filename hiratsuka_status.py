@@ -268,7 +268,19 @@ def read_counts(page, year: int, month: int):
         show_images(page)
         raise RuntimeError("「施設別に切替」が見つかりません")
     page.wait_for_timeout(3000)
-    counts = parse_count_table(page.content())
+    html = page.content()
+    if os.environ.get("DEBUG_TABLE") == "1":
+        try:
+            body = ht.norm(page.inner_text("body"))
+            rooms = sorted(set(re.findall(r"\S*(?:武道場|体育館|アリーナ)\S*", body)))
+            print("[診断] 画面の施設名:", rooms[:10])
+        except Exception:
+            pass
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.IGNORECASE | re.DOTALL):
+            cells = ht._cells(tr)
+            if cells and (_DATE_RE.match(cells[0]) or any(_TIME_RE.search(c) for c in cells)):
+                print("[診断] 行:", cells[:9])
+    counts = parse_count_table(html)
     if not counts:
         show_images(page)
         raise RuntimeError("件数の表が読めません")
