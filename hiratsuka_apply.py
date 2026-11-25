@@ -27,6 +27,8 @@ import hiratsuka_status as hs
 from samukawa import LoginFailed, show_labels
 
 JST = ZoneInfo("Asia/Tokyo")
+# 申込が確定していて、システムが触ってはいけない月(試験でも操作しない)
+LOCKED_MONTHS = {(2027, 1)}
 
 
 # ---------------------------------------------------------------- 画面を使わない部分
@@ -137,6 +139,9 @@ def main():
         assert re.fullmatch(r"\d{2}:\d{2}", start)
     except Exception:
         print("[エラー] ID番号・日付(例 2027-01-10)・開始時刻(例 15:00)を正しく入れてください")
+        sys.exit(1)
+    if (d.year, d.month) in LOCKED_MONTHS:
+        print(f"[中止] {d.year}年{d.month}月分は申込が確定しているため、操作しません")
         sys.exit(1)
     if d.weekday() != 6:
         print("[エラー] 日曜日ではありません")
