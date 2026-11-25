@@ -1,0 +1,53 @@
+name: 合気道 平塚 抽選申込の今の状況
+
+# 平塚市公共施設予約システムに全ID(Secrets の HIRATSUKA_ACCOUNTS)でログインし、
+# 「抽選申込内容」(団体ごとの申込)と「施設別抽選申込状況」(全団体の件数)を読んで、
+# 枠ごとに「全体・こちら・他団体(競合)」を出す。読むだけで、申込・取消はしない。
+# 結果は実行ログと、メール(送る設定のとき)で見る。ファイルは保存しない。
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 調べる月(例 2027-01)。空欄なら2か月後(申込期間中の月)
+        default: ""
+      send_mail:
+        description: 1=結果をメールでも送る 0=ログだけ
+        default: "1"
+
+concurrency:
+  group: hiratsuka-status
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://shisetsu.city.hiratsuka.kanagawa.jp/cultos/reserve/gin_menu || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::平塚の予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: 調べる
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          HIRATSUKA_ACCOUNTS: ${{ secrets.HIRATSUKA_ACCOUNTS }}
+          SUMMARY_MONTH: ${{ github.event.inputs.month }}
+          SEND_MAIL: ${{ github.event.inputs.send_mail || '1' }}
+        run: python hiratsuka_status.py
