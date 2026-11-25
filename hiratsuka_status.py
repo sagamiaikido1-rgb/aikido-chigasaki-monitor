@@ -38,11 +38,21 @@ _TIME_RE = re.compile(r"(\d{1,2})\s*:\s*(\d{2})\s*[〜~\-－ー]?\s*(\d{1,2})\s*
 _DATE_RE = re.compile(r"^(\d{1,2})\s*/\s*(\d{1,2})\s*\(\s*([日月火水木金土])")
 
 
+def _cells_alt(tr_html):
+    """表の1行のセルを読む。×・休館が画像のときは alt の文字を使う。"""
+    out = []
+    for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr_html, re.IGNORECASE | re.DOTALL):
+        alts = " ".join(re.findall(r"alt=[\"']([^\"']*)[\"']", c))
+        t = re.sub(r"<[^>]+>", " ", c).replace("&nbsp;", " ").replace("&amp;", "&")
+        out.append(ht.norm(t + " " + alts))
+    return out
+
+
 def parse_count_table(html: str):
     """施設別抽選申込状況の表 → {(月, 日, "15:00"): 件数(int) / "×" / "休館"}。"""
     times, out = [], {}
     for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html or "", re.IGNORECASE | re.DOTALL):
-        cells = ht._cells(tr)
+        cells = _cells_alt(tr)
         if not cells:
             continue
         found = [m for m in (_TIME_RE.search(c) for c in cells) if m]
@@ -62,8 +72,10 @@ def parse_count_table(html: str):
                 out[(mo, d, t)] = int(v)
             elif "休" in v:
                 out[(mo, d, t)] = "休館"
-            elif v in ("×", "x", "X", "✕", "－", "-") or "×" in v:
+            elif v in ("×", "x", "X", "✕", "－", "-") or "×" in v or "不可" in v:
                 out[(mo, d, t)] = "×"
+            elif re.search(r"\d+", v):
+                out[(mo, d, t)] = int(re.search(r"\d+", v).group())
     return out
 
 
@@ -235,6 +247,18 @@ def _set_start_date(page, year: int, month: int):
                 break
 
 
+class NotHalfRoom(Exception):
+    pass
+
+
+def _is_half_room(page) -> bool:
+    try:
+        body = ht.norm(page.inner_text("body")).replace(" ", "")
+    except Exception:
+        return False
+    return "第1武道場1/2面" in body
+
+
 def read_counts(page, year: int, month: int):
     """ログイン済みの画面から、施設別抽選申込状況の件数表を読む。"""
     # 一覧の画面にも「抽選申込内容」の文字があるため、必ず利用者専用ページへ戻ってから進む
@@ -245,9 +269,18 @@ def read_counts(page, year: int, month: int):
         raise RuntimeError("「抽選申込」が見つかりません")
     page.wait_for_timeout(2500)
     show_images(page)
-    # お気に入り検索(抽選):お気に入り①を選んで検索
-    _click(page, ["お気に入り①", "お気に入り1", "お気に入り１"], timeout=4000)
-    page.wait_for_timeout(1000)
+    # お気に入り検索(抽選):部屋が「第1武道場 1/2面」のお気に入りを選んで検索
+    #  (団体によって、お気に入り①が「全面」になっていることがある)
+    picked = False
+    for n in ("１", "２", "３"):
+        if not _click(page, [f"お気に入り{n}", f"お気に入り{'123'['１２３'.index(n)]}"], timeout=4000):
+            continue
+        page.wait_for_timeout(1500)
+        if _is_half_room(page):
+            picked = True
+            break
+    if not picked:
+        raise NotHalfRoom("「第1武道場1/2面」のお気に入りがありません")
     if not _click(page, ["検索", "検 索", "kensaku", "search"], timeout=8000,
                   exclude=("しない", "お気に入り検索", "nokensaku")):
         raise RuntimeError("「検索」が見つかりません")
@@ -269,6 +302,8 @@ def read_counts(page, year: int, month: int):
         raise RuntimeError("「施設別に切替」が見つかりません")
     page.wait_for_timeout(3000)
     html = page.content()
+    if not _is_half_room(page):
+        raise NotHalfRoom("件数の表が「第1武道場1/2面」ではありません")
     if os.environ.get("DEBUG_TABLE") == "1":
         try:
             body = ht.norm(page.inner_text("body"))
@@ -298,6 +333,8 @@ def read_one(browser, uid, pw, year, month, want_counts):
         if want_counts:
             try:
                 counts = read_counts(page, year, month)
+            except NotHalfRoom as e:
+                print(f"[注意] このIDでは件数の表を読めません: {e}。次のIDで試します")
             except Exception as e:
                 print(f"[注意] 件数の表を読めませんでした: {type(e).__name__} {str(e)[:60]}")
                 show_labels(page)
