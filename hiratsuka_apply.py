@@ -96,6 +96,7 @@ def dry_run(page, year, month, day, start):
     body = ht.norm(page.inner_text("body")).replace(" ", "")
     if "申込内容設定" not in body and "利用目的" not in body:
         hs.show_images(page)
+        print("[診断] 画面の文(抜粋):", [t for t in re.findall(r"[^。]{0,40}(?:選択|次へ|押して|クリック)[^。]{0,20}", body)][:6])
         raise RuntimeError("申込内容設定の画面になりませんでした")
     if "1/2面" not in body:
         raise RuntimeError("申込内容設定の部屋が「1/2面」ではありません。中止します")

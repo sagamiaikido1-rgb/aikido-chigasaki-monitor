@@ -217,7 +217,9 @@ def show_images(page):
                      (e.getAttribute('value') || e.innerText || '').trim().slice(0, 15),
                      (e.getAttribute('href') || e.getAttribute('onclick') || '').slice(0, 40)].join('|'))""")
         items = [x for x in items if not re.search(r"\d{5,}|さん", x)]
-        print("[診断] 画像・ボタン:", items[:40])
+        # 件数表のセル(数字だけ)・×や休館の画像は省く
+        items = [x for x in items if not re.fullmatch(r"a\|\|\|\d+\|", x) and "icon_timetable" not in x]
+        print("[診断] 画像・ボタン:", items[:60])
     except Exception as e:
         print(f"[診断] 画像の取得に失敗: {type(e).__name__}")
 
