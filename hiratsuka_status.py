@@ -157,11 +157,57 @@ def _click_exact(page, name, timeout=8000):
     return False
 
 
-def _click(page, names, timeout=8000):
+_KW_JS = """([kws, excl]) => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const label = e => [e.getAttribute('alt'), e.getAttribute('title'), e.getAttribute('value'),
+                      (e.innerText || ''), (e.getAttribute('src') || '').split('/').pop()]
+                     .filter(Boolean).join(' ').replace(/\\s+/g, '');
+  const els = [...document.querySelectorAll('a, button, input[type=image], input[type=button], input[type=submit], img')]
+    .filter(vis);
+  for (const kw of kws) {
+    for (const e of els) {
+      const t = label(e);
+      if (t.includes(kw) && !excl.some(x => t.includes(x))) {
+        const target = e.tagName === 'IMG' ? (e.closest('a, button') || e) : e;
+        target.click();
+        return t.slice(0, 30);
+      }
+    }
+  }
+  return null;
+}"""
+
+
+def _click_kw(page, kws, exclude=()):
+    """alt・title・文字・画像ファイル名のどれかに言葉を含むボタンを押す(画像ボタン対策)。"""
+    try:
+        hit = page.evaluate(_KW_JS, [list(kws), list(exclude)])
+    except Exception:
+        hit = None
+    return bool(hit)
+
+
+def _click(page, names, timeout=8000, exclude=()):
     for n in names:
         if _click_exact(page, n, timeout):
             return True
+    if _click_kw(page, [n.replace(" ", "") for n in names], exclude):
+        return True
     return ht._click_any(page, names, timeout=timeout)
+
+
+def show_images(page):
+    """診断用:画像ボタンの alt・画像ファイル名・リンク先の名前だけを出す(個人情報は出さない)。"""
+    try:
+        items = page.evaluate("""() => [...document.querySelectorAll('a, input[type=image], img, button, input[type=submit], input[type=button]')]
+          .filter(e => !!(e.offsetWidth || e.offsetHeight))
+          .map(e => [e.tagName.toLowerCase(), e.getAttribute('alt') || '', (e.getAttribute('src') || '').split('/').pop(),
+                     (e.getAttribute('value') || e.innerText || '').trim().slice(0, 15),
+                     (e.getAttribute('href') || e.getAttribute('onclick') || '').slice(0, 40)].join('|'))""")
+        items = [x for x in items if not re.search(r"\d{5,}|さん", x)]
+        print("[診断] 画像・ボタン:", items[:40])
+    except Exception as e:
+        print(f"[診断] 画像の取得に失敗: {type(e).__name__}")
 
 
 def _set_start_date(page, year: int, month: int):
@@ -192,13 +238,15 @@ def _set_start_date(page, year: int, month: int):
 def read_counts(page, year: int, month: int):
     """ログイン済みの画面から、施設別抽選申込状況の件数表を読む。"""
     ht.go_user_page(page)
-    if not _click(page, ["抽選申込"], timeout=10000):
+    if not _click(page, ["抽選申込"], timeout=10000, exclude=("内容", "確認", "削除")):
         raise RuntimeError("「抽選申込」が見つかりません")
     page.wait_for_timeout(2500)
+    show_images(page)
     # お気に入り検索(抽選):お気に入り①を選んで検索
     _click(page, ["お気に入り①", "お気に入り1", "お気に入り１"], timeout=4000)
     page.wait_for_timeout(1000)
-    if not _click(page, ["検索", "検 索"], timeout=8000):
+    if not _click(page, ["検索", "検 索", "kensaku", "search"], timeout=8000,
+                  exclude=("しない", "お気に入り検索", "nokensaku")):
         raise RuntimeError("「検索」が見つかりません")
     page.wait_for_timeout(2500)
     # 表示選択:開始日と曜日(日)
@@ -209,14 +257,17 @@ def read_counts(page, year: int, month: int):
             box.first.check()
     except Exception:
         pass
-    if not _click(page, ["確定", "確 定"], timeout=8000):
+    if not _click(page, ["確定", "確 定", "kakutei"], timeout=8000):
+        show_images(page)
         raise RuntimeError("表示選択の「確定」が見つかりません")
     page.wait_for_timeout(3000)
     if not _click(page, ["施設別に切替", "施設別"], timeout=8000):
+        show_images(page)
         raise RuntimeError("「施設別に切替」が見つかりません")
     page.wait_for_timeout(3000)
     counts = parse_count_table(page.content())
     if not counts:
+        show_images(page)
         raise RuntimeError("件数の表が読めません")
     return counts
 
