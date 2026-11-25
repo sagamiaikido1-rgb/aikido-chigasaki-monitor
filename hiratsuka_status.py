@@ -259,8 +259,8 @@ def _is_half_room(page) -> bool:
     return "第1武道場1/2面" in body
 
 
-def read_counts(page, year: int, month: int):
-    """ログイン済みの画面から、施設別抽選申込状況の件数表を読む。"""
+def open_count_table(page, year: int, month: int):
+    """ログイン済みの画面から、施設別抽選申込状況の件数表(1/2面・日曜)まで進む。"""
     # 一覧の画面にも「抽選申込内容」の文字があるため、必ず利用者専用ページへ戻ってから進む
     if not ht._click_any(page, ["利用者専用ページ", "利用者ページへ"], timeout=8000):
         raise RuntimeError("利用者専用ページへ戻れません")
@@ -268,7 +268,8 @@ def read_counts(page, year: int, month: int):
     if not _click(page, ["抽選申込"], timeout=10000, exclude=("内容", "確認", "削除")):
         raise RuntimeError("「抽選申込」が見つかりません")
     page.wait_for_timeout(2500)
-    show_images(page)
+    if os.environ.get("DEBUG_TABLE") == "1":
+        show_images(page)
     # お気に入り検索(抽選):部屋が「第1武道場 1/2面」のお気に入りを選んで検索
     #  (団体によって、お気に入り①が「全面」になっていることがある)
     picked = False
@@ -301,9 +302,14 @@ def read_counts(page, year: int, month: int):
         show_images(page)
         raise RuntimeError("「施設別に切替」が見つかりません")
     page.wait_for_timeout(3000)
-    html = page.content()
     if not _is_half_room(page):
         raise NotHalfRoom("件数の表が「第1武道場1/2面」ではありません")
+
+
+def read_counts(page, year: int, month: int):
+    """ログイン済みの画面から、施設別抽選申込状況の件数表を読む。"""
+    open_count_table(page, year, month)
+    html = page.content()
     if os.environ.get("DEBUG_TABLE") == "1":
         try:
             body = ht.norm(page.inner_text("body"))

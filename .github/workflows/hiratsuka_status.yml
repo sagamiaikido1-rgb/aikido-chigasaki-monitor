@@ -16,6 +16,9 @@ on:
       debug:
         description: 1=件数の表の読み取りの様子もログに出す
         default: "0"
+      test_apply:
+        description: (開発用)申込の試験。「ID番号 日付 開始」例「3 2027-01-10 15:00」。確定の手前で止まり、申込はしない
+        default: ""
 
 concurrency:
   group: hiratsuka-status
@@ -45,7 +48,17 @@ jobs:
             echo "::error::平塚の予約サイトに入れませんでした($code)。ログインせずに中止しました。"
             exit 1
           fi
+      - name: 申込の試験(確定の手前で止まる。申込はしない)
+        if: ${{ github.event.inputs.test_apply != '' }}
+        env:
+          HIRATSUKA_ACCOUNTS: ${{ secrets.HIRATSUKA_ACCOUNTS }}
+          TEST_APPLY: ${{ github.event.inputs.test_apply }}
+          APPLY_MODE: dry
+        run: |
+          set -- $TEST_APPLY
+          APPLY_ID="$1" APPLY_DATE="$2" APPLY_START="${3:-15:00}" python hiratsuka_apply.py
       - name: 調べる
+        if: ${{ github.event.inputs.test_apply == '' }}
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
