@@ -259,6 +259,33 @@ def _is_half_room(page) -> bool:
     return "第1武道場1/2面" in body
 
 
+_WEEKDAY_JS = """() => {
+  const out = [];
+  for (const cb of document.querySelectorAll('input[type=checkbox]')) {
+    let t = '';
+    if (cb.id) { const l = document.querySelector(`label[for="${cb.id}"]`); if (l) t = l.innerText; }
+    if (!t && cb.closest('label')) t = cb.closest('label').innerText;
+    if (!t && cb.nextSibling) t = cb.nextSibling.textContent || (cb.nextElementSibling && cb.nextElementSibling.innerText) || '';
+    t = (t || '').trim();
+    if (!['日','月','火','水','木','金','土','祝日'].includes(t)) continue;
+    const want = (t === '日');
+    if (cb.checked !== want) cb.click();
+    out.push(t + (cb.checked ? '○' : '・'));
+  }
+  return out;
+}"""
+
+
+def _only_sunday(page):
+    """表示選択の曜日を「日」だけにする(お気に入りの曜日が団体によって違うため)。"""
+    try:
+        got = page.evaluate(_WEEKDAY_JS)
+    except Exception:
+        got = []
+    if "日○" not in got:
+        raise RuntimeError(f"曜日を「日」にできません: {got}")
+
+
 def open_count_table(page, year: int, month: int):
     """ログイン済みの画面から、施設別抽選申込状況の件数表(1/2面・日曜)まで進む。"""
     # 一覧の画面にも「抽選申込内容」の文字があるため、必ず利用者専用ページへ戻ってから進む
@@ -288,12 +315,7 @@ def open_count_table(page, year: int, month: int):
     page.wait_for_timeout(2500)
     # 表示選択:開始日と曜日(日)
     _set_start_date(page, year, month)
-    try:
-        box = page.get_by_label("日", exact=True)
-        if _visible(box) and not box.first.is_checked():
-            box.first.check()
-    except Exception:
-        pass
+    _only_sunday(page)
     if not _click(page, ["確定", "確 定", "kakutei"], timeout=8000):
         show_images(page)
         raise RuntimeError("表示選択の「確定」が見つかりません")
