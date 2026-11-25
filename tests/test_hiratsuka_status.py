@@ -48,3 +48,10 @@ assert "同好会" not in rep and "ID1(同好会)" in hs.build_report(2027, 1, s
 rep3 = hs.build_report(2027, 1, hs.analyze({}, ours, [1, 2, 3, 4], 1)[0], per, False, [4])
 assert "全体 ? / こちら 3 / 他団体 ?" in rep3 and "ID4: 読み取れませんでした" in rep3
 print("ok")
+
+# ×・休館が画像(alt)のとき
+IMG = ("<table>" + head + "<tr><td>01/17(日)</td>" + "".join("<td><img src='x.gif' alt='×'></td>" for _ in range(5))
+       + "<td>6</td></tr><tr><td>01/03(日)</td>" + "".join("<td><img alt='休館'></td>" for _ in range(6)) + "</tr></table>")
+ci = hs.parse_count_table(IMG)
+assert ci[(1, 17, "09:00")] == "×" and ci[(1, 17, "19:00")] == 6 and ci[(1, 3, "15:00")] == "休館", ci
+print("ok2")
