@@ -1,0 +1,56 @@
+name: 合気道 平塚 抽選申込(1件・試験)
+
+# 平塚の抽選申込を1件だけ操作する。今は「試験(dry)」だけ:
+# 確定の手前(抽選申込確定の画面)まで進んで、ボタンを押さずに止まり、画面のボタン名をログに出す。申込はしない。
+on:
+  workflow_dispatch:
+    inputs:
+      id_no:
+        description: 使う団体のID番号(HIRATSUKA_ACCOUNTS の上から何番目か。例 3)
+        required: true
+      date:
+        description: 日付(例 2027-01-10)
+        required: true
+      start:
+        description: 開始時刻(昼 15:00 / 夕 17:00 / 夜 19:00)
+        default: "15:00"
+      mode:
+        description: dry=試験(申込しない)
+        default: "dry"
+
+concurrency:
+  group: hiratsuka-apply
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_BROWSERS_PATH: C:\actions-runner\tools\ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/home-setup
+      - name: 予約サイトに入れるか先に確認(入れなければ、ここで止める)
+        run: |
+          code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" -A "Mozilla/5.0" https://shisetsu.city.hiratsuka.kanagawa.jp/cultos/reserve/gin_menu || echo 000)
+          echo "予約サイトの応答: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::平塚の予約サイトに入れませんでした($code)。ログインせずに中止しました。"
+            exit 1
+          fi
+      - name: 操作する
+        env:
+          HIRATSUKA_ACCOUNTS: ${{ secrets.HIRATSUKA_ACCOUNTS }}
+          APPLY_ID: ${{ github.event.inputs.id_no }}
+          APPLY_DATE: ${{ github.event.inputs.date }}
+          APPLY_START: ${{ github.event.inputs.start }}
+          APPLY_MODE: ${{ github.event.inputs.mode }}
+        run: python hiratsuka_apply.py

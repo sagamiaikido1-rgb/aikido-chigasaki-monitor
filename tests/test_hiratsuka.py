@@ -45,3 +45,27 @@ assert ht.target_month(date(2026, 12, 2)) == (2027, 1) and ht.target_month(date(
 acc = ht.load_accounts({"HIRATSUKA_ACCOUNTS": "111,a\n222 b\n"})
 assert acc == [(1, "111", "a"), (2, "222", "b")]
 print("ok")
+
+# 当選後の取消(2026-11-26 追加)
+LOT2 = ("<table>" + tr("01/10", "日", "15:00", "17:00", "<td>当選</td>")
+        + tr("01/17", "日", "15:00", "17:00", "<td>当選</td>")
+        + tr("01/17", "日", "19:00", "21:00", "<td>当選</td>") + "</table>")
+# ID1: 1/10昼は仮予約あり、1/17昼は予約一覧から消えた(削除)、1/17夜は取消の表示
+RES3 = (HEAD + tr("01/10", "日", "15:00", "17:00", "<td>仮</td><td>12/10</td>")
+        + tr("01/17", "日", "19:00", "21:00", "<td>取消</td><td></td>") + "</table>")
+d2 = ht.build_import_data([(1, ht.parse_rows(RES3), ht.parse_rows(LOT2))], 2027, 1, [], now)
+assert [s["date"] + s["start"] for s in d2["secured"]] == ["2027-01-1015:00"], d2
+assert [s["date"] + s["start"] for s in d2["cancelled"]] == ["2027-01-1715:00", "2027-01-1719:00"], d2
+assert d2["lost"] == [] and d2["pending"] == []
+assert "取り消した枠 2枠" in ht.build_report(d2)
+# 別のIDが同じ枠を確保していれば確保済みのまま(1/2面を2つ)
+RES4 = HEAD + tr("01/17", "日", "19:00", "21:00", "<td>仮</td><td>12/10</td>") + "</table>"
+d3 = ht.build_import_data([(1, ht.parse_rows(RES3), ht.parse_rows(LOT2)), (2, ht.parse_rows(RES4), [])], 2027, 1, [], now)
+assert "2027-01-17" in [s["date"] for s in d3["secured"] if s["start"] == "19:00"]
+assert [s["start"] for s in d3["cancelled"]] == ["15:00"], d3
+# 抽選直後で予約一覧にまだ何もない → 当選は確保済み(取消にしない)
+d4 = ht.build_import_data([(1, [], ht.parse_rows(LOT2))], 2027, 1, [], now)
+assert len(d4["secured"]) == 3 and d4["cancelled"] == []
+# 同じ日の昼と夜の両方を確保 → 両方出る
+assert [s["start"] for s in d4["secured"] if s["date"] == "2027-01-17"] == ["15:00", "19:00"]
+print("ok(取消)")

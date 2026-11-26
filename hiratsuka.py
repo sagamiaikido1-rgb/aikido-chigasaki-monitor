@@ -9,10 +9,11 @@
   - 予約結果一覧にある枠(仮予約・本予約)、抽選申込一覧で「当選」 → 確保済み
   - 抽選申込一覧で「申込中」「抽選待ち」(まだ抽選前)            → 要確認(管理画面では変更しない)
   - 抽選申込一覧で「落選」                                      → 全IDで落選
+  - 当選後に予約を取り消した枠(予約結果一覧で取消、または一覧から消えた) → 取消
   - どれにもない日は、管理画面で「確保なし」として削除候補になる
 
-平塚は利用月の前月1日に抽選、2日から結果が見られ、10日までに支払わないと予約が消える。
-そのため毎月2日と11日の朝に動かす(過去の当落は見られないため、その時点の内容で判断する)。
+平塚は利用月の前月1日に抽選、1日(休館日以外)から結果が見られ、10日までに支払わないと予約が消える。
+そのため毎月1日の昼・夕方と、2日・11日の朝に動かす(過去の当落は見られないため、その時点の内容で判断する)。
 
 安全のため
   - 読むだけ。申込・取消・支払いなどの操作は一切しない
@@ -105,30 +106,54 @@ def paid_text(rest: str) -> str:
     return "未払い"
 
 
+CANCEL_WORDS = ("取消", "取り消", "キャンセル")
+
+
+def is_cancelled(rest: str) -> bool:
+    return any(w in rest for w in CANCEL_WORDS)
+
+
 def build_import_data(accounts, year: int, month: int, failed, now=None):
-    """accounts: [(ID番号, 予約結果一覧の行, 抽選申込一覧の行)] → 管理画面の「抽選取込」用(茅ヶ崎・寒川と同じ形)。"""
-    secured, lost, pending = {}, set(), set()
+    """accounts: [(ID番号, 予約結果一覧の行, 抽選申込一覧の行)] → 管理画面の「抽選取込」用(茅ヶ崎・寒川と同じ形)。
+
+    当選後に代表が予約を取り消した枠は「取消」(cancelled)にする。平塚は当選すると予約結果一覧に仮予約ができるため、
+      - 予約結果一覧で取消の表示がある枠
+      - 抽選で「当選」なのに、予約結果一覧(このIDの対象月の予約はある)に見当たらない枠(削除された)
+    を取消とみなす。同じ枠を別のIDが確保していれば、確保済みのまま。
+    """
+    secured, lost, pending, cancelled = {}, set(), set(), set()
 
     def key(r):
         return (date(year, month, r["day"]).isoformat(), r["start"], r["end"])
 
     for _idx, reserved, lottery in accounts:
-        for r in reserved:
-            if r["month"] == month and is_target(r):
-                k = key(r)
-                p = paid_text(r["rest"])
-                if k not in secured or p == "支払い済み":
-                    secured[k] = p
+        mine = [r for r in reserved if r["month"] == month and is_target(r)]
+        active = {key(r) for r in mine if not is_cancelled(r["rest"])}
+        gone = {key(r) for r in mine if is_cancelled(r["rest"])}
+        for r in mine:
+            if is_cancelled(r["rest"]):
+                continue
+            k = key(r)
+            p = paid_text(r["rest"])
+            if k not in secured or p == "支払い済み":
+                secured[k] = p
         for r in lottery:
             if r["month"] != month or not is_target(r):
                 continue
             kind = lottery_kind(r["rest"])
+            k = key(r)
             if kind == "当選":
-                secured.setdefault(key(r), "未払い")
+                if k in active:
+                    continue
+                if k in gone or mine:
+                    cancelled.add(k)   # 当選後に予約を取り消した(または一覧から削除した)
+                else:
+                    secured.setdefault(k, "未払い")   # 予約一覧にまだ出ていない(抽選直後など)。当選として扱う
             elif kind == "落選":
-                lost.add(key(r))
+                lost.add(k)
             elif kind in ("抽選待ち", "その他"):
-                pending.add(key(r))
+                pending.add(k)
+        cancelled |= gone
 
     def slot(k):
         return {"date": k[0], "start": k[1], "end": k[2]}
@@ -141,8 +166,9 @@ def build_import_data(accounts, year: int, month: int, failed, now=None):
         "generated_at": now.strftime("%Y-%m-%d %H:%M"),
         "failed_ids": sorted(failed),
         "secured": [dict(slot(k), facility="総合体育館 第1武道場1/2面", payment=secured[k]) for k in sorted(secured)],
-        "lost": [slot(k) for k in sorted(lost) if k not in secured],
-        "pending": [slot(k) for k in sorted(pending) if k not in secured],
+        "lost": [slot(k) for k in sorted(lost) if k not in secured and k not in cancelled],
+        "pending": [slot(k) for k in sorted(pending) if k not in secured and k not in cancelled],
+        "cancelled": [slot(k) for k in sorted(cancelled) if k not in secured],
     }
 
 
@@ -157,6 +183,9 @@ def build_report(data, who_failed=""):
         lines += ["", f"※ 未払いが {len(unpaid)}枠あります。毎月10日までに支払わないと予約が自動で消えます。"]
     lines += ["", f"■ 全IDで落選 {len(data['lost'])}枠"]
     lines += [fmt(s) for s in data["lost"]]
+    if data.get("cancelled"):
+        lines += ["", f"■ 当選後に取り消した枠 {len(data['cancelled'])}枠  ※管理画面では「取消」と表示し、HPからは削除します"]
+        lines += [fmt(s) for s in data["cancelled"]]
     if data["pending"]:
         lines += ["", f"■ まだ抽選前(申込中) {len(data['pending'])}枠  ※管理画面では変更しません"]
         lines += [fmt(s) for s in data["pending"]]
@@ -362,7 +391,7 @@ def main():
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
     print(f"\n取込用ファイルを保存しました: 確保済み {len(data['secured'])}枠 / 全IDで落選 {len(data['lost'])}枠"
-          f" / 抽選前 {len(data['pending'])}枠")
+          f" / 抽選前 {len(data['pending'])}枠 / 取消 {len(data['cancelled'])}枠")
 
     if os.environ.get("SEND_MAIL", "1") == "1":
         import check_availability as ca

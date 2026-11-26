@@ -27,6 +27,7 @@ $Jobs = @(
   @{ Name='茅ヶ崎 抽選結果まとめ';       Wf='summary.yml';   Days=@(18);        Times=@('07:17'); CatchUp=24*12; Inputs=@{} }
   @{ Name='寒川 抽選結果まとめ';         Wf='samukawa.yml';  Days=@(15);        Times=@('07:17'); CatchUp=24*14; Inputs=@{} }
   @{ Name='平塚 抽選・予約まとめ';       Wf='hiratsuka.yml'; Days=@(2,11);      Times=@('07:17'); CatchUp=24*8;  Inputs=@{} }
+  @{ Name='平塚 当選結果(1日)';         Wf='hiratsuka.yml'; Days=@(1);         Times=@('12:17','18:17'); CatchUp=12; Inputs=@{} }
   @{ Name='申込のお知らせ(1日)';        Wf='reminder.yml';  Days=@(1);         Times=@('08:00'); CatchUp=14;    Inputs=@{ force='0' } }
   @{ Name='抽選申込の登録(30分おき)';   Wf='register.yml';  Days=@(1..15 + 28..31); Times=@(0..23 | ForEach-Object { '{0:00}:11' -f $_; '{0:00}:41' -f $_ }); CatchUp=0.5; Inputs=@{} }
   @{ Name='抽選分析';                   Wf='analyze.yml';   Days=@();          Times=@('20:11'); CatchUp=6;     Inputs=@{} }

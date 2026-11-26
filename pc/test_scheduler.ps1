@@ -38,6 +38,7 @@ Step '2026-11-28 00:15' @('register.yml|', 'analyze.yml|', 'lottery.yml|')  # 28
 Step '2026-11-28 00:25' @()
 Step '2026-11-28 00:45' @('register.yml|')
 Step '2026-12-01 08:05' @('reminder.yml|force=0', 'register.yml|', 'flow.yml|cmd=plan')   # 1日 8:00(force=0 で時刻実行と同じ動き)。register は 07:41 の分。1日の申込案(0:05)は14時間以内なので遅れて頼む
+Step '2026-12-01 12:20' @('hiratsuka.yml|', 'register.yml|')    # 平塚 1日 12:17 の当選結果(register は 12:11 の分)
 Step '2026-12-02 07:20' @('hiratsuka.yml|', 'register.yml|')    # 平塚 2日 7:17(register は 07:11 の分)
 Step '2026-12-15 10:45' @('samukawa.yml|', 'hiratsuka.yml|', 'register.yml|')  # 寒川 15日 7:17。平塚 11日の分(電源オフで未実行)は8日以内なので遅れて頼む。15日9時の件数チェックは1時間を過ぎたので見送り
 Step '2026-12-15 15:05' @('register.yml|', 'flow.yml|cmd=check')     # 15日 15:00 の見込みの確認
